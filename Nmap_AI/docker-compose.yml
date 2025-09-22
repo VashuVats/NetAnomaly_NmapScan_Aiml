@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: netscan-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      # Mount for potential log files or data persistence
+      - ./backend/logs:/app/logs
+    networks:
+      - netscan-network
+    restart: unless-stopped
+    # Security: Run as non-root user
+    user: "1000:1000"
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service (Development)
+  frontend:
+    build:
+      context: ./frontend/NMAP_AI_Scanner
+      dockerfile: Dockerfile.dev
+    container_name: netscan-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:3001
+      - VITE_NODE_ENV=development
+    volumes:
+      # Mount source code for hot reloading
+      - ./frontend/NMAP_AI_Scanner/src:/app/src
+      - ./frontend/NMAP_AI_Scanner/public:/app/public
+      - ./frontend/NMAP_AI_Scanner/index.html:/app/index.html
+    networks:
+      - netscan-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  netscan-network:
+    driver: bridge
+
+volumes:
+  backend-logs:
+    driver: local
