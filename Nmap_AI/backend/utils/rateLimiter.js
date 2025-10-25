@@ -1,8 +1,7 @@
-// Simple in-memory rate limiter
 const rateLimitMap = new Map();
 
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-const MAX_REQUESTS_PER_WINDOW = 10; // 10 requests per 15 minutes per IP
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; 
+const MAX_REQUESTS_PER_WINDOW = 10;
 
 exports.rateLimiter = (req, res, next) => {
   const clientIP = req.ip || req.connection.remoteAddress || 'unknown';

@@ -1,6 +1,8 @@
+const { marked } = require('marked');
+const sanitizeHtml = require('sanitize-html');
+
 exports.buildReportHtml = (target, scanOutput, aiSummary) => {
-  // Sanitize inputs to prevent XSS
-  const sanitize = (str) => {
+  const escapeText = (str) => {
     if (typeof str !== 'string') return '';
     return str
       .replace(/&/g, '&amp;')
@@ -11,9 +13,21 @@ exports.buildReportHtml = (target, scanOutput, aiSummary) => {
       .replace(/\//g, '&#x2F;');
   };
 
-  const safeTarget = sanitize(target || 'N/A');
-  const safeScanOutput = sanitize(scanOutput || '');
-  const safeAiSummary = sanitize(aiSummary || '');
+  const safeTarget = escapeText(target || 'N/A');
+  const safeScanOutput = escapeText(scanOutput || '');
+
+  const rawSummaryMd = typeof aiSummary === 'string' ? aiSummary : '';
+  const summaryHtml = marked.parse(rawSummaryMd || '');
+  const safeAiSummary = sanitizeHtml(summaryHtml, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat(['h1','h2','h3','h4','h5','h6','img','span']),
+    allowedAttributes: {
+      a: ['href', 'name', 'target', 'rel'],
+      img: ['src', 'alt', 'title'],
+      '*': ['class']
+    },
+    allowedSchemes: ['http', 'https', 'mailto']
+  });
+
   const currentDate = new Date().toUTCString();
 
   return `
@@ -173,7 +187,7 @@ exports.buildReportHtml = (target, scanOutput, aiSummary) => {
       <div class="section">
         <h2>🔍 AI-Powered Analysis</h2>
         <div class="summary-content">
-          ${safeAiSummary.split('\n').map(line => `<p>${line}</p>`).join('')}
+          ${safeAiSummary}
         </div>
       </div>
 

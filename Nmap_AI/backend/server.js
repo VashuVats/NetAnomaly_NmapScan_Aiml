@@ -4,7 +4,6 @@ const app = require("./app");
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// Graceful shutdown handling
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
   process.exit(0);
@@ -15,7 +14,6 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
   process.exit(1);
@@ -32,7 +30,6 @@ const server = app.listen(PORT, () => {
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
 });
 
-// Graceful shutdown for server
 const gracefulShutdown = () => {
   server.close(() => {
     console.log('Server closed');

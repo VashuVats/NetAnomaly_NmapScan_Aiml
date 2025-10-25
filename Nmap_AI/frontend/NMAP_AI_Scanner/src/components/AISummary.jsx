@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { BrainCircuitIcon } from './Icons';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 
 export default function AISummary({ aiSummary, onGenerate, isSummarizing, canGenerate = true }) {
@@ -31,7 +33,10 @@ export default function AISummary({ aiSummary, onGenerate, isSummarizing, canGen
 
 
             {aiSummary && (
-                <div className="prose prose-invert prose-sm max-w-none h-96 overflow-y-auto" dangerouslySetInnerHTML={{ __html: aiSummary }}></div>
+                <div
+                    className="prose prose-invert prose-sm max-w-none h-96 overflow-y-auto"
+                    dangerouslySetInnerHTML={{ __html: useMemo(() => DOMPurify.sanitize(marked.parse(aiSummary || ''), { USE_PROFILES: { html: true } }), [aiSummary]) }}
+                ></div>
             )}
 
 

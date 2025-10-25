@@ -12,12 +12,12 @@ export default function ScanForm({ onStartScan, isLoading = false }) {
         e && e.preventDefault();
         setError('');
         if (!target.trim()) return setError('Please enter target');
-        
+
         // Basic validation for IP/domain
         const targetValue = target.trim();
         const isValidTarget = /^[a-zA-Z0-9.-]+$/.test(targetValue) && targetValue.length > 0;
         if (!isValidTarget) return setError('Please enter a valid IP address or domain name');
-        
+
         // call parent handler which will call API
         try {
             await onStartScan({ target: targetValue, scanType });
@@ -36,7 +36,6 @@ export default function ScanForm({ onStartScan, isLoading = false }) {
                     <option value="basic">Basic Scan (-sV)</option>
                     <option value="aggressive">Aggressive Scan (-A)</option>
                     <option value="passive">Passive Scan (-sS -T4)</option>
-                    <option value="vuln">Vuln Scan (--script vuln)</option>
                 </select>
                 <button type="submit" disabled={isLoading} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center gap-2">
                     {isLoading ? <LoaderDots /> : <>Scan</>}
