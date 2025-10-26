@@ -1,0 +1,15 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	conn
+#open	2025-10-26-13-40-21
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	service	duration	orig_bytes	resp_bytes	conn_state	local_orig	local_resp	missed_bytes	history	orig_pkts	orig_ip_bytes	resp_pkts	resp_ip_bytes	tunnel_parents	ip_proto
+#types	time	string	addr	port	addr	port	enum	string	interval	count	count	string	bool	bool	count	string	count	count	count	count	set[string]	count
+1761463777.651514	CPbQT7HXKJ6HKnXkh	172.21.112.1	5353	224.0.0.251	5353	udp	dns	0.818093	795	0	S0	T	T	0	D	6	963	0	0	-	17
+1761463777.655140	C4FF5N7W5zwmdp4ci	fe80::273b:8fd9:abbf:7433	5353	ff02::fb	5353	udp	dns	0.818080	795	0	S0	T	F	0	D	6	1083	0	0	-	17
+1761463898.482114	CU2i3N1lGPPUxBI9Kj	172.21.112.1	5353	224.0.0.251	5353	udp	dns	0.806590	795	0	S0	T	T	0	D	6	963	0	0	-	17
+1761463898.485831	CcWgha48nLn41ICqXk	fe80::273b:8fd9:abbf:7433	5353	ff02::fb	5353	udp	dns	0.805849	795	0	S0	T	F	0	D	6	1083	0	0	-	17
+1761464019.305527	C7AsrZysINJ9ZBX5a	172.21.112.1	5353	224.0.0.251	5353	udp	dns	0.813233	795	0	S0	T	T	0	D	6	963	0	0	-	17
+1761464019.308586	CInjQG2WzW8TvxmG9	fe80::273b:8fd9:abbf:7433	5353	ff02::fb	5353	udp	dns	0.813678	795	0	S0	T	F	0	D	6	1083	0	0	-	17
+#close	2025-10-26-13-40-21
