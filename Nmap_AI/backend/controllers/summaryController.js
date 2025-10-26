@@ -22,9 +22,11 @@ exports.getSummary = async (req, res) => {
       });
     }
 
-    if (!apiKey) {
+    if (!apiKey || apiKey === 'your_gemini_api_key_here') {
       return res.status(500).json({ 
-        error: 'Missing Gemini API key. Please configure GEMINI_API_KEY in environment variables.' 
+        error: 'Missing or invalid Gemini API key. Please configure GEMINI_API_KEY in environment variables.',
+        details: 'Create a .env file in the backend directory with: GEMINI_API_KEY=your_actual_api_key',
+        help: 'Get your API key from: https://makersuite.google.com/app/apikey'
       });
     }
 
@@ -90,6 +92,7 @@ ${scanOutput}
 
 Please provide a detailed security analysis following the structure outlined above.`;
 
+    console.log('Sending request to Gemini API...');
     const result = await model.generateContent({
       contents: [
         {
@@ -102,9 +105,11 @@ Please provide a detailed security analysis following the structure outlined abo
       }
     });
 
+    console.log('Received response from Gemini API');
     const summary = result?.response?.text?.();
 
     if (!summary || summary.trim().length < 50) {
+      console.error('Empty or insufficient response from AI model:', summary);
       throw new Error('Empty or insufficient response from AI model');
     }
 
@@ -122,24 +127,43 @@ Please provide a detailed security analysis following the structure outlined abo
     console.error('Error generating AI summary:', error);
     
     // Handle specific error types
-    if (error.message.includes('API key')) {
+    if (error.message.includes('API key') || error.message.includes('API_KEY')) {
       return res.status(500).json({ 
         error: 'Invalid or missing API key',
-        details: 'Please check your GEMINI_API_KEY environment variable'
+        details: 'Please check your GEMINI_API_KEY environment variable',
+        help: 'Get your API key from: https://makersuite.google.com/app/apikey'
       });
     }
     
-    if (error.message.includes('quota')) {
+    if (error.message.includes('quota') || error.message.includes('QUOTA_EXCEEDED')) {
       return res.status(429).json({ 
         error: 'API quota exceeded',
-        details: 'Please try again later or check your API usage limits'
+        details: 'Please try again later or check your API usage limits',
+        help: 'Check your Gemini API usage at: https://makersuite.google.com/app/apikey'
+      });
+    }
+
+    if (error.message.includes('PERMISSION_DENIED')) {
+      return res.status(403).json({ 
+        error: 'Permission denied',
+        details: 'Your API key does not have permission to access Gemini API',
+        help: 'Check your API key permissions at: https://makersuite.google.com/app/apikey'
+      });
+    }
+
+    if (error.message.includes('network') || error.message.includes('timeout')) {
+      return res.status(503).json({ 
+        error: 'Network error',
+        details: 'Unable to connect to Gemini API. Please check your internet connection.',
+        help: 'Try again in a few moments'
       });
     }
 
     return res.status(500).json({ 
       error: 'Failed to generate AI summary', 
       details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      help: 'Check the backend logs for more details'
     });
   }
 };

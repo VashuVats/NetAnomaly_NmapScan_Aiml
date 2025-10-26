@@ -206,17 +206,19 @@ def score_pcap():
                 'pcap': str(candidate)
             }), 500
 
-        # Move (or rename) conn_log into a consistent results path (use shutil.move to handle cross-fs)
+        # Copy conn_log to a consistent results path (keep original)
         final_log = output_dir / f'conn_{timestamp}.log'
         try:
-            shutil.move(str(conn_log), str(final_log))
-        except Exception as e:
-            # fallback: copy then remove
+            # Always copy, never move - preserve original file
             shutil.copy2(str(conn_log), str(final_log))
-            try:
-                conn_log.unlink()
-            except Exception:
-                pass
+            print(f"✅ Copied conn log: {conn_log} -> {final_log}")
+        except Exception as e:
+            print(f"❌ Error copying conn log: {e}")
+            return jsonify({
+                'error': f'Failed to copy conn log: {str(e)}',
+                'conn_log': str(conn_log),
+                'final_log': str(final_log)
+            }), 500
 
         return jsonify({
             'success': True,
@@ -255,23 +257,52 @@ def predict():
         candidate = None
         if conn_log:
             p = Path(conn_log)
+            print(f"🔍 Looking for conn_log: {p}")
             if not p.exists():
                 p = (RESULTS_DIR / Path(conn_log).name)
+                print(f"🔍 Trying RESULTS_DIR: {p}")
             if not p.exists():
                 p = (PCAP_DIR / Path(conn_log).name)
+                print(f"🔍 Trying PCAP_DIR: {p}")
             if p.exists():
                 candidate = p.resolve()
+                print(f"✅ Found conn_log: {candidate}")
+            else:
+                print(f"❌ conn_log not found: {conn_log}")
 
         if candidate is None:
-            # prefer newest conn_*.log in RESULTS_DIR, fallback to PCAP_DIR
-            conn_files = sorted(list(RESULTS_DIR.glob('conn*.log')) + list(RESULTS_DIR.glob('conn*.log.*')),
-                                key=lambda p: p.stat().st_mtime, reverse=True)
+            # Look for conn logs in RESULTS_DIR subdirectories first, then PCAP_DIR
+            conn_files = []
+            
+            print(f"🔍 Searching for conn logs in RESULTS_DIR subdirectories...")
+            # First, look in RESULTS_DIR subdirectories (zeek_* folders)
+            for zeek_dir in RESULTS_DIR.glob('zeek_*'):
+                if zeek_dir.is_dir():
+                    found_logs = list(zeek_dir.glob('conn*.log'))
+                    print(f"🔍 Found {len(found_logs)} logs in {zeek_dir}")
+                    conn_files.extend(found_logs)
+            
+            print(f"🔍 Searching for conn logs directly in RESULTS_DIR...")
+            # Then look directly in RESULTS_DIR
+            direct_logs = list(RESULTS_DIR.glob('conn*.log'))
+            print(f"🔍 Found {len(direct_logs)} logs in RESULTS_DIR")
+            conn_files.extend(direct_logs)
+            
+            # Finally, fallback to PCAP_DIR
             if not conn_files:
+                print(f"🔍 Searching for conn logs in PCAP_DIR...")
                 conn_files = sorted(list(PCAP_DIR.glob('conn*.log')) + list(PCAP_DIR.glob('conn*.log.*')),
                                     key=lambda p: p.stat().st_mtime, reverse=True)
+                print(f"🔍 Found {len(conn_files)} logs in PCAP_DIR")
+            
             if not conn_files:
+                print("❌ No conn logs found anywhere!")
                 return jsonify({'success': False, 'error': 'No conn log found on server'}), 400
+            
+            # Sort by modification time and pick newest
+            conn_files = sorted(conn_files, key=lambda p: p.stat().st_mtime, reverse=True)
             candidate = conn_files[0].resolve()
+            print(f"✅ Selected newest conn_log: {candidate}")
 
         if not candidate.exists():
             return jsonify({'success': False, 'error': f'conn log not found: {str(candidate)}'}), 400
@@ -321,9 +352,67 @@ def predict():
         else:
             parsed_meta['scorer_output'] = parsed
 
-        # If scorer wrote the CSV, ensure it exists
+        # If scorer wrote the CSV, ensure it exists and analyze results
         if output_csv.exists():
             parsed_meta['output_csv'] = str(output_csv)
+            
+            # Analyze the CSV results to provide meaningful statistics
+            try:
+                df = pd.read_csv(output_csv)
+                
+                # Calculate statistics
+                total_records = len(df)
+                normal_count = len(df[df['predicted_class'] == 0]) if 'predicted_class' in df.columns else 0
+                attack_count = len(df[df['predicted_class'] != 0]) if 'predicted_class' in df.columns else 0
+                
+                # High confidence alerts (only for attack classes with confidence > 0.8)
+                high_conf_alerts = 0
+                if 'confidence' in df.columns and 'predicted_class' in df.columns:
+                    # Only count as high confidence alerts if:
+                    # 1. It's an attack (predicted_class != 0)
+                    # 2. Confidence is truly high (> 0.8)
+                    attack_records = df[df['predicted_class'] != 0]
+                    high_conf_alerts = len(attack_records[attack_records['confidence'] > 0.8])
+                
+                # Attack type breakdown
+                attack_breakdown = {}
+                if 'predicted_class' in df.columns:
+                    attack_types = df[df['predicted_class'] != 0]['predicted_class'].value_counts()
+                    attack_type_names = {0: 'Normal', 1: 'DoS', 2: 'Probe', 3: 'R2L', 4: 'U2R'}
+                    attack_breakdown = {attack_type_names.get(k, f'Class_{k}'): int(v) for k, v in attack_types.items()}
+                
+                # Calculate confidence statistics
+                avg_confidence = float(df['confidence'].mean()) if 'confidence' in df.columns else 0.0
+                max_confidence = float(df['confidence'].max()) if 'confidence' in df.columns else 0.0
+                
+                # Count confidence levels for normal traffic
+                normal_high_conf = 0
+                normal_medium_conf = 0
+                normal_low_conf = 0
+                
+                if 'confidence' in df.columns and 'predicted_class' in df.columns:
+                    normal_records = df[df['predicted_class'] == 0]
+                    if len(normal_records) > 0:
+                        normal_high_conf = len(normal_records[normal_records['confidence'] > 0.8])
+                        normal_medium_conf = len(normal_records[(normal_records['confidence'] >= 0.6) & (normal_records['confidence'] <= 0.8)])
+                        normal_low_conf = len(normal_records[normal_records['confidence'] < 0.6])
+
+                # Add calculated statistics to response
+                parsed_meta.update({
+                    'total_records': int(total_records),
+                    'normal': int(normal_count),
+                    'attacks': int(attack_count),
+                    'high_confidence_alerts': int(high_conf_alerts),
+                    'attack_breakdown': attack_breakdown,
+                    'avg_confidence': avg_confidence,
+                    'max_confidence': max_confidence,
+                    'normal_high_conf': int(normal_high_conf),
+                    'normal_medium_conf': int(normal_medium_conf),
+                    'normal_low_conf': int(normal_low_conf)
+                })
+                
+            except Exception as e:
+                parsed_meta['analysis_error'] = f'Failed to analyze CSV results: {str(e)}'
         else:
             # if scorer reported a different output path, include it
             if 'output_csv' in parsed_meta and Path(parsed_meta['output_csv']).exists():
@@ -355,15 +444,48 @@ def list_files():
     """List all available result files"""
     try:
         files = []
+        
+        # List files in RESULTS_DIR
         for file_path in RESULTS_DIR.glob('*'):
             if file_path.is_file():
                 files.append({
                     'name': file_path.name,
+                    'path': str(file_path),
                     'size': file_path.stat().st_size,
-                    'modified': file_path.stat().st_mtime
+                    'modified': file_path.stat().st_mtime,
+                    'type': 'result_file'
                 })
+        
+        # List conn logs in subdirectories
+        for zeek_dir in RESULTS_DIR.glob('zeek_*'):
+            if zeek_dir.is_dir():
+                for conn_file in zeek_dir.glob('conn*.log'):
+                    files.append({
+                        'name': conn_file.name,
+                        'path': str(conn_file),
+                        'size': conn_file.stat().st_size,
+                        'modified': conn_file.stat().st_mtime,
+                        'type': 'conn_log',
+                        'directory': zeek_dir.name
+                    })
+        
+        # List PCAP files
+        for pcap_file in PCAP_DIR.glob('*.pcap'):
+            files.append({
+                'name': pcap_file.name,
+                'path': str(pcap_file),
+                'size': pcap_file.stat().st_size,
+                'modified': pcap_file.stat().st_mtime,
+                'type': 'pcap_file'
+            })
+        
         files.sort(key=lambda x: x['modified'], reverse=True)
-        return jsonify({'files': files})
+        return jsonify({
+            'files': files,
+            'total_files': len(files),
+            'conn_logs': len([f for f in files if f['type'] == 'conn_log']),
+            'pcap_files': len([f for f in files if f['type'] == 'pcap_file'])
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

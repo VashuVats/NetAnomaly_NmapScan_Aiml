@@ -1,0 +1,15 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	dns
+#open	2025-10-26-16-50-28
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	trans_id	rtt	query	qclass	qclass_name	qtype	qtype_name	rcode	rcode_name	AA	TC	RD	RA	Z	answers	TTLs	rejected
+#types	time	string	addr	port	addr	port	enum	count	interval	string	count	string	count	string	count	string	bool	bool	bool	bool	count	vector[string]	vector[interval]	bool
+1761477463.552087	CdV23ih1JJpknFnE8	172.21.112.1	5353	224.0.0.251	5353	udp	0	-	laptop-8bbn1ee9._dosvc._tcp.local	1	C_INTERNET	255	*	0	NOERROR	T	F	F	F	0	laptop-8bbn1ee9._dosvc._tcp.local	0.000000	F
+1761477463.556115	CGXBMR14XIqhrQrFYf	fe80::273b:8fd9:abbf:7433	5353	ff02::fb	5353	udp	0	-	laptop-8bbn1ee9._dosvc._tcp.local	1	C_INTERNET	255	*	0	NOERROR	T	F	F	F	0	laptop-8bbn1ee9._dosvc._tcp.local	0.000000	F
+1761477463.818861	CdV23ih1JJpknFnE8	172.21.112.1	5353	224.0.0.251	5353	udp	0	0.522589	laptop-8bbn1ee9._dosvc._tcp.local	1	C_INTERNET	255	*	0	NOERROR	T	F	F	F	0	laptop-8bbn1ee9._dosvc._tcp.local	4500.000000	F
+1761477463.822702	CGXBMR14XIqhrQrFYf	fe80::273b:8fd9:abbf:7433	5353	ff02::fb	5353	udp	0	0.522895	laptop-8bbn1ee9._dosvc._tcp.local	1	C_INTERNET	255	*	0	NOERROR	T	F	F	F	0	laptop-8bbn1ee9._dosvc._tcp.local	4500.000000	F
+1761477464.081021	CdV23ih1JJpknFnE8	172.21.112.1	5353	224.0.0.251	5353	udp	0	0.267431	laptop-8bbn1ee9._dosvc._tcp.local	1	C_INTERNET	255	*	0	NOERROR	T	F	F	F	0	laptop-8bbn1ee9.local	120.000000	F
+1761477464.085139	CGXBMR14XIqhrQrFYf	fe80::273b:8fd9:abbf:7433	5353	ff02::fb	5353	udp	0	0.269215	laptop-8bbn1ee9._dosvc._tcp.local	1	C_INTERNET	255	*	0	NOERROR	T	F	F	F	0	laptop-8bbn1ee9.local	120.000000	F
+#close	2025-10-26-16-50-28
