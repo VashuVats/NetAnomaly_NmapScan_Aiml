@@ -1,8 +1,10 @@
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// Gemini model name comes from .env so a retired model can be swapped without code changes.
+// "gemini-flash-latest" is Google's alias that always points to the current Flash model.
+// (The old hard-coded "gemini-1.5-flash" was retired by Google in September 2025.)
+const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 
 /**
  * Generate AI-powered security analysis from Nmap scan output
@@ -26,7 +28,7 @@ exports.getSummary = async (req, res) => {
       return res.status(500).json({ 
         error: 'Missing or invalid Gemini API key. Please configure GEMINI_API_KEY in environment variables.',
         details: 'Create a .env file in the backend directory with: GEMINI_API_KEY=your_actual_api_key',
-        help: 'Get your API key from: https://makersuite.google.com/app/apikey'
+        help: 'Get your API key from: https://aistudio.google.com/apikey'
       });
     }
 
@@ -40,7 +42,9 @@ exports.getSummary = async (req, res) => {
     console.log(`Generating AI analysis for target: ${target || 'Unknown'}`);
 
     // Use Gemini SDK for better error handling and consistency
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const modelName = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+    const model = genAI.getGenerativeModel({ model: modelName });
 
     const systemPrompt = `You are a professional cybersecurity analyst with expertise in network security and vulnerability assessment. 
 
@@ -131,7 +135,7 @@ Please provide a detailed security analysis following the structure outlined abo
       return res.status(500).json({ 
         error: 'Invalid or missing API key',
         details: 'Please check your GEMINI_API_KEY environment variable',
-        help: 'Get your API key from: https://makersuite.google.com/app/apikey'
+        help: 'Get your API key from: https://aistudio.google.com/apikey'
       });
     }
     
@@ -139,7 +143,15 @@ Please provide a detailed security analysis following the structure outlined abo
       return res.status(429).json({ 
         error: 'API quota exceeded',
         details: 'Please try again later or check your API usage limits',
-        help: 'Check your Gemini API usage at: https://makersuite.google.com/app/apikey'
+        help: 'Check your Gemini API usage at: https://aistudio.google.com/apikey'
+      });
+    }
+
+    if (error.message.includes('404') || /not found/i.test(error.message)) {
+      return res.status(502).json({
+        error: 'Gemini model not available',
+        details: `The model "${process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL}" was not found. Google may have retired it.`,
+        help: 'Set GEMINI_MODEL in backend/.env to a current model name, for example gemini-flash-latest'
       });
     }
 
@@ -147,7 +159,7 @@ Please provide a detailed security analysis following the structure outlined abo
       return res.status(403).json({ 
         error: 'Permission denied',
         details: 'Your API key does not have permission to access Gemini API',
-        help: 'Check your API key permissions at: https://makersuite.google.com/app/apikey'
+        help: 'Check your API key permissions at: https://aistudio.google.com/apikey'
       });
     }
 

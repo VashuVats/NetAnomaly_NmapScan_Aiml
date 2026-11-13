@@ -12,10 +12,34 @@ import pandas as pd
 import numpy as np
 import shutil
 import stat
+import re
+import threading
 from shutil import which
 
 app = Flask(__name__)
-CORS(app)
+# Only the Node backend and the local frontend should call this API.
+CORS(app, origins=os.environ.get('ML_API_CORS_ORIGINS', 'http://localhost:3000,http://localhost:3001').split(','))
+
+# Capture limits
+MIN_CAPTURE_SECONDS = 5
+MAX_CAPTURE_SECONDS = 600
+INTERFACE_RE = re.compile(r'^[A-Za-z0-9_.:\-]{1,64}$')
+SAFE_FILENAME_RE = re.compile(r'^[A-Za-z0-9_.\-]{1,128}$')
+
+
+def allowed_interfaces():
+    raw = os.environ.get('ALLOWED_INTERFACES', '').strip()
+    return [i.strip() for i in raw.split(',') if i.strip()]
+
+
+def validate_interface(name):
+    """Return an error message if the interface name is not allowed, else None."""
+    if not isinstance(name, str) or not INTERFACE_RE.match(name):
+        return 'Invalid interface name'
+    allowed = allowed_interfaces()
+    if allowed and name not in allowed:
+        return f'Interface not allowed. Allowed: {", ".join(allowed)}'
+    return None
 
 # Configuration
 BASE_DIR = Path(__file__).parent.resolve()
@@ -66,8 +90,16 @@ def start_tcpdump():
     
     try:
         data = request.json or {}
-        duration = data.get('duration', 30)  # default 30 seconds
-        interface = data.get('interface', 'eth0')  # default interface
+        try:
+            duration = int(data.get('duration', 30))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'duration must be a whole number of seconds'}), 400
+        if not MIN_CAPTURE_SECONDS <= duration <= MAX_CAPTURE_SECONDS:
+            return jsonify({'success': False, 'error': f'duration must be between {MIN_CAPTURE_SECONDS} and {MAX_CAPTURE_SECONDS} seconds'}), 400
+        interface = data.get('interface', 'eth0')
+        iface_error = validate_interface(interface)
+        if iface_error:
+            return jsonify({'success': False, 'error': iface_error}), 400
         
         # Stop any existing tcpdump
         if tcpdump_process:
@@ -89,13 +121,14 @@ def start_tcpdump():
             stderr=subprocess.PIPE
         )
         
-        # Schedule automatic stop after duration
+        # Schedule automatic stop after duration (only stop the process we started)
+        proc = tcpdump_process
+
         def stop_after_duration():
             time.sleep(duration)
-            if tcpdump_process:
-                tcpdump_process.terminate()
-        
-        import threading
+            if proc.poll() is None:
+                proc.terminate()
+
         timer = threading.Thread(target=stop_after_duration, daemon=True)
         timer.start()
         
@@ -378,7 +411,8 @@ def predict():
                 attack_breakdown = {}
                 if 'predicted_class' in df.columns:
                     attack_types = df[df['predicted_class'] != 0]['predicted_class'].value_counts()
-                    attack_type_names = {0: 'Normal', 1: 'DoS', 2: 'Probe', 3: 'R2L', 4: 'U2R'}
+                    # Must match the training notebook: 3 = Privilege (U2R), 4 = Access (R2L)
+                    attack_type_names = {0: 'Normal', 1: 'DoS', 2: 'Probe', 3: 'U2R', 4: 'R2L'}
                     attack_breakdown = {attack_type_names.get(k, f'Class_{k}'): int(v) for k, v in attack_types.items()}
                 
                 # Calculate confidence statistics
@@ -431,7 +465,12 @@ def predict():
 def download_file(filename):
     """Download generated files"""
     try:
-        file_path = RESULTS_DIR / filename
+        # Only plain file names inside RESULTS_DIR (no paths, no "..")
+        if not SAFE_FILENAME_RE.match(filename or '') or filename.startswith('.'):
+            return jsonify({'error': 'Invalid file name'}), 400
+        file_path = (RESULTS_DIR / filename).resolve()
+        if file_path.parent != RESULTS_DIR.resolve():
+            return jsonify({'error': 'Invalid file name'}), 400
         if file_path.exists() and file_path.is_file():
             return send_file(file_path, as_attachment=True)
         else:
@@ -507,4 +546,8 @@ if __name__ == '__main__':
     print(f"📁 PCAP Directory: {PCAP_DIR.absolute()}")
     print(f"📁 Results Directory: {RESULTS_DIR.absolute()}")
     print(f"🤖 Model Path: {MODEL_PATH.absolute()}")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Debug mode lets anyone who can reach the port run code, so it is off unless asked for.
+    host = os.environ.get('ML_API_HOST', '127.0.0.1')
+    port = int(os.environ.get('ML_API_PORT', '5000'))
+    debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true')
+    app.run(host=host, port=port, debug=debug)
