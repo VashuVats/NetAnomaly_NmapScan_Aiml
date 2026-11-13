@@ -1,7 +1,7 @@
 const { marked } = require('marked');
 const sanitizeHtml = require('sanitize-html');
 
-exports.buildReportHtml = (target, scanOutput, aiSummary) => {
+exports.buildReportHtml = (target, scanOutput, aiSummary, intel = null) => {
   const escapeText = (str) => {
     if (typeof str !== 'string') return '';
     return str
@@ -29,6 +29,28 @@ exports.buildReportHtml = (target, scanOutput, aiSummary) => {
   });
 
   const currentDate = new Date().toUTCString();
+
+  // Known vulnerabilities table (from the threat intel lookup), if the user ran it
+  const vulnRows = [];
+  if (intel && Array.isArray(intel.hosts)) {
+    for (const h of intel.hosts) {
+      for (const p of h.ports || []) {
+        for (const v of (p.vulns || []).slice(0, 5)) {
+          vulnRows.push(`<tr><td>${escapeText(String(h.address || ''))}:${Number(p.port) || ''}</td>`
+            + `<td>${escapeText(String(v.id || ''))}${v.kev ? ' <strong>(exploited in the wild)</strong>' : ''}</td>`
+            + `<td>${v.cvss == null ? '-' : Number(v.cvss).toFixed(1)} ${escapeText(String(v.severity || ''))}</td>`
+            + `<td>${v.epss == null ? '-' : (Number(v.epss) * 100).toFixed(1) + '%'}</td></tr>`);
+        }
+      }
+    }
+  }
+  const vulnSection = vulnRows.length ? `
+      <div class="section">
+        <h2>Known vulnerabilities</h2>
+        <p>From NVD, CISA KEV and FIRST EPSS. Top 5 per port. EPSS is the chance of exploitation in the next 30 days.</p>
+        <table class="vuln-table"><thead><tr><th>Host:port</th><th>CVE</th><th>CVSS</th><th>EPSS</th></tr></thead>
+        <tbody>${vulnRows.join('')}</tbody></table>
+      </div>` : '';
 
   return `
 <!DOCTYPE html>
@@ -108,6 +130,9 @@ exports.buildReportHtml = (target, scanOutput, aiSummary) => {
       font-weight: 500;
     }
     
+    .vuln-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.75rem; }
+    .vuln-table th, .vuln-table td { border-bottom: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+
     .section {
       margin-bottom: 2rem;
     }
@@ -191,6 +216,7 @@ exports.buildReportHtml = (target, scanOutput, aiSummary) => {
         </div>
       </div>
 
+${vulnSection}
       <div class="section">
         <h2>📊 Raw Scan Output</h2>
         <div class="scan-output">${safeScanOutput}</div>

@@ -11,9 +11,35 @@ const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
+/**
+ * Turn threat intel results into a short, factual list for the prompt, so the model
+ * talks about real CVEs instead of guessing.
+ */
+function formatIntelForPrompt(intel) {
+  if (!intel || !Array.isArray(intel.hosts)) return '';
+  const lines = [];
+  for (const h of intel.hosts.slice(0, 20)) {
+    for (const p of (h.ports || []).slice(0, 50)) {
+      for (const v of (p.vulns || []).slice(0, 3)) {
+        const parts = [`${h.address}:${p.port}`, v.id, `CVSS ${v.cvss ?? 'n/a'} ${v.severity || ''}`.trim()];
+        if (v.kev) parts.push('KNOWN EXPLOITED (CISA KEV)');
+        if (v.epss != null) parts.push(`EPSS ${(v.epss * 100).toFixed(1)}%`);
+        lines.push(`- ${parts.join(' | ')}`);
+      }
+    }
+    if (h.internetDb && h.internetDb.ports && h.internetDb.ports.length) {
+      lines.push(`- ${h.address}: Shodan already sees ports ${h.internetDb.ports.slice(0, 20).join(', ')}`);
+    }
+  }
+  if (!lines.length) return '';
+  return `\n**Known vulnerabilities from NVD / CISA KEV / EPSS lookups** (use these facts; do not invent other CVE numbers):\n${lines.slice(0, 60).join('\n')}\n`;
+}
+
+exports.formatIntelForPrompt = formatIntelForPrompt;
+
 exports.getSummary = async (req, res) => {
   try {
-    const { scanOutput, target } = req.body;
+    const { scanOutput, target, intel } = req.body;
     const apiKey = process.env.GEMINI_API_KEY;
 
     // Input validation
@@ -94,6 +120,7 @@ Format the response in clear, professional language suitable for both technical 
 ${scanOutput}
 \`\`\`
 
+${formatIntelForPrompt(intel)}
 Please provide a detailed security analysis following the structure outlined above.`;
 
     console.log('Sending request to Gemini API...');
