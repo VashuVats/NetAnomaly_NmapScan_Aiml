@@ -1,49 +1,31 @@
 import React, { useMemo } from 'react';
-import { BrainCircuitIcon } from './Icons';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { Button, Panel, Spinner } from './ui';
 
-
-export default function AISummary({ aiSummary, onGenerate, isSummarizing, canGenerate = true }) {
-    return (
-        <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-                <h2 className="text-2xl font-semibold text-white">GenAI Analysis</h2>
-                {!aiSummary && (
-                    <button 
-                        onClick={onGenerate} 
-                        disabled={isSummarizing || !canGenerate} 
-                        className="mt-2 sm:mt-0 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-800 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2"
-                    >
-                        <BrainCircuitIcon className="w-5 h-5" />
-                        <span>{isSummarizing ? 'Analyzing...' : 'Analyze'}</span>
-                    </button>
-                )}
-            </div>
-
-
-            {isSummarizing && !aiSummary && (
-                <div className="flex items-center justify-center h-80">
-                    <div className="text-center">
-                        <BrainCircuitIcon className="w-12 h-12 text-indigo-400 mx-auto animate-pulse" />
-                        <p className="mt-4 text-gray-400">AI is analyzing the scan results...</p>
-                    </div>
-                </div>
-            )}
-
-
-            {aiSummary && (
-                <div
-                    className="prose prose-invert prose-sm max-w-none h-96 overflow-y-auto"
-                    dangerouslySetInnerHTML={{ __html: useMemo(() => DOMPurify.sanitize(marked.parse(aiSummary || ''), { USE_PROFILES: { html: true } }), [aiSummary]) }}
-                ></div>
-            )}
-
-
-            {!aiSummary && !isSummarizing && (
-                <p className="text-gray-400">Run a scan and click Analyze to generate an AI summary.</p>
-            )}
-        </div>
-    );
+export default function AISummary({ aiSummary, onGenerate, isSummarizing, canGenerate, hasIntel, error }) {
+  const html = useMemo(
+    () => (aiSummary ? DOMPurify.sanitize(marked.parse(aiSummary), { USE_PROFILES: { html: true } }) : ''),
+    [aiSummary],
+  );
+  return (
+    <Panel
+      title="AI analysis"
+      actions={
+        <Button variant={aiSummary ? 'secondary' : 'primary'} onClick={onGenerate} disabled={isSummarizing || !canGenerate}>
+          {aiSummary ? 'Write again' : 'Write analysis'}
+        </Button>
+      }
+    >
+      {isSummarizing && <Spinner label="Gemini is reading the scan results" />}
+      {error && !isSummarizing && <p className="text-sm text-critical">{error}</p>}
+      {!aiSummary && !isSummarizing && !error && (
+        <p className="text-sm text-muted">
+          Gemini writes a plain-language risk report from the scan
+          {hasIntel ? ', using the CVE facts found above.' : '. Wait for the vulnerability check to finish for a more accurate report.'}
+        </p>
+      )}
+      {aiSummary && !isSummarizing && <div className="md max-h-[32rem] overflow-y-auto pr-1" dangerouslySetInnerHTML={{ __html: html }} />}
+    </Panel>
+  );
 }
-

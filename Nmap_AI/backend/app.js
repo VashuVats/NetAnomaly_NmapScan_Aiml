@@ -5,6 +5,7 @@ const scanRoutes = require("./routes/scanRoutes");
 const summaryRoutes = require("./routes/summaryRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const analysisRoutes = require("./routes/analysisRoutes");
+const intelRoutes = require("./routes/intelRoutes");
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use("/api/scan", scanRoutes);
 app.use("/api/ai-summary", summaryRoutes);
 app.use("/api/report", reportRoutes);
 app.use("/api/analysis", analysisRoutes);
+app.use("/api/intel", intelRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });

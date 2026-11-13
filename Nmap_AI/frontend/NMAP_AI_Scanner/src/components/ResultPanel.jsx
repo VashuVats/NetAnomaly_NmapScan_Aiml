@@ -1,11 +1,12 @@
 import React from 'react';
 
-
-export default function ResultPanel({ scanOutput }) {
-    return (
-        <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700">
-            <h2 className="text-2xl font-semibold mb-4 text-white">Nmap Scan Output</h2>
-            <pre className="bg-black text-sm text-green-400 rounded-lg p-4 overflow-x-auto h-96"><code>{scanOutput}</code></pre>
-        </div>
-    );
+export default function ResultPanel({ scanOutput, stats }) {
+  return (
+    <details className="rounded-lg border border-line bg-surface">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+        Raw nmap output{stats?.elapsedSeconds ? <span className="font-normal text-muted"> (took {stats.elapsedSeconds}s)</span> : null}
+      </summary>
+      <pre className="max-h-96 overflow-auto border-t border-line bg-code-bg p-4 font-mono text-xs leading-relaxed"><code>{scanOutput}</code></pre>
+    </details>
+  );
 }

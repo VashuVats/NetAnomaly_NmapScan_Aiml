@@ -33,14 +33,26 @@ async function proxyToMLAPI(endpoint, method = 'GET', body = null) {
 }
 
 /**
+ * Is the Python ML API running, and which model does it use?
+ */
+exports.health = async (req, res) => {
+  try {
+    const result = await proxyToMLAPI('/health', 'GET');
+    res.status(result.status).json({ reachable: true, ...result.data });
+  } catch (error) {
+    res.json({ reachable: false, error: `ML API not reachable at ${ML_API_URL}. Start it with: python app.py (in Nmap_AI/ml_api)` });
+  }
+};
+
+/**
  * Start tcpdump to capture network traffic
  */
 exports.startTcpdump = async (req, res) => {
   try {
-    const { duration, interface } = req.body;
+    const { duration, interface: networkInterface } = req.body || {};
     const result = await proxyToMLAPI('/api/analysis/start-tcpdump', 'POST', {
       duration: duration || 30,
-      interface: interface || 'eth0'
+      interface: networkInterface || 'eth0'
     });
     
     res.status(result.status).json(result.data);
@@ -118,7 +130,10 @@ exports.listFiles = async (req, res) => {
 exports.downloadFile = async (req, res) => {
   try {
     const { filename } = req.params;
-    const url = `${ML_API_URL}/api/analysis/download/${filename}`;
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(filename) || filename.startsWith('.')) {
+      return res.status(400).json({ error: 'Invalid file name' });
+    }
+    const url = `${ML_API_URL}/api/analysis/download/${encodeURIComponent(filename)}`;
     const response = await fetch(url);
     
     if (!response.ok) {

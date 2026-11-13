@@ -2,7 +2,7 @@ const puppeteer = require('puppeteer');
 const { buildReportHtml } = require('../utils/buildReportHtml');
 
 exports.generateReport = async (req, res) => {
-  const { target, scanOutput, aiSummary } = req.body;
+  const { target, scanOutput, aiSummary, intel } = req.body;
 
   // Input validation
   if (!scanOutput || !aiSummary) {
@@ -22,7 +22,7 @@ exports.generateReport = async (req, res) => {
 
   // Sanitize target for filename
   const sanitizedTarget = target ? target.replace(/[^a-zA-Z0-9.-]/g, '_') : 'unknown';
-  const htmlContent = buildReportHtml(target, scanOutput, aiSummary);
+  const htmlContent = buildReportHtml(target, scanOutput, aiSummary, intel && typeof intel === 'object' ? intel : null);
 
   let browser;
   try {
