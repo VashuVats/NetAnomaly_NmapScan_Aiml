@@ -1,1 +1,107 @@
 @import "tailwindcss";
+
+/* Dark mode follows data-theme on <html> (set by ThemeProvider) */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/*
+  Colour tokens. Colour is used for meaning only:
+  critical = act now, warning = look at this, safe = fine, info = neutral fact,
+  unusual = not a known attack but not normal either (from the anomaly detector).
+*/
+:root {
+  --bg: #f2f4f3;
+  --surface: #ffffff;
+  --surface-2: #e8edeb;
+  --ink: #16211f;
+  --muted: #56655f;
+  --line: #d3dbd8;
+  --accent: #1f6f5c;
+  --accent-ink: #ffffff;
+  --critical: #b42318;
+  --warning: #b54708;
+  --safe: #067647;
+  --info: #175cd3;
+  --unusual: #6941c6;
+  --code-bg: #e8edeb;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #141c1b;
+  --surface: #1b2524;
+  --surface-2: #233130;
+  --ink: #e6edeb;
+  --muted: #9aaaa5;
+  --line: #2f3d3b;
+  --accent: #5cc8a8;
+  --accent-ink: #0d2a22;
+  --critical: #f97066;
+  --warning: #fdb022;
+  --safe: #47cd89;
+  --info: #84adff;
+  --unusual: #bdb4fe;
+  --code-bg: #101716;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-critical: var(--critical);
+  --color-warning: var(--warning);
+  --color-safe: var(--safe);
+  --color-info: var(--info);
+  --color-unusual: var(--unusual);
+  --color-code-bg: var(--code-bg);
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* AI summary (markdown) */
+.md { font-size: 0.95rem; }
+.md h1, .md h2, .md h3, .md h4 { font-weight: 600; line-height: 1.3; margin: 1.25em 0 0.4em; }
+.md h1 { font-size: 1.25rem; }
+.md h2 { font-size: 1.1rem; }
+.md h3, .md h4 { font-size: 1rem; }
+.md > :first-child { margin-top: 0; }
+.md p, .md ul, .md ol { margin: 0.5em 0; }
+.md ul { list-style: disc; padding-left: 1.25em; }
+.md ol { list-style: decimal; padding-left: 1.25em; }
+.md li { margin: 0.2em 0; }
+.md strong { font-weight: 600; }
+.md code { font-family: var(--font-mono); font-size: 0.85em; background: var(--code-bg); padding: 0.1em 0.3em; border-radius: 3px; }
+.md pre { background: var(--code-bg); padding: 0.75em; border-radius: 6px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md a { color: var(--info); text-decoration: underline; }
+.md table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+.md th, .md td { border-bottom: 1px solid var(--line); padding: 0.35em 0.5em; text-align: left; }

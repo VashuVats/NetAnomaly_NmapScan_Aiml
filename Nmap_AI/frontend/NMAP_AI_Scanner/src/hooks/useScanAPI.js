@@ -1,92 +1,67 @@
 import { useCallback } from 'react';
 import { useScan } from '../context/ScanContext';
-import { apiStartScan, apiGenerateAISummary, apiDownloadReport } from '../utils/api';
+import { apiDownloadReport, apiEnrich, apiGenerateAISummary, apiStartScan, downloadBlob } from '../utils/api';
 
 export function useScanAPI() {
   const { state, actions } = useScan();
 
-  const startScan = useCallback(async (target, scanType) => {
+  const lookUpVulnerabilities = useCallback(async (hosts) => {
+    if (!hosts || !hosts.length) return;
+    actions.startEnrich();
     try {
-      actions.startScan(target, scanType);
-      const result = await apiStartScan({ target, scanType });
-      actions.scanSuccess(result);
+      actions.enrichSuccess(await apiEnrich({ hosts }));
     } catch (error) {
-      console.error('Scan failed:', error);
-      actions.scanError(error.message);
+      actions.enrichError(error.message);
     }
   }, [actions]);
+
+  const startScan = useCallback(async (target, scanType) => {
+    actions.startScan(target, scanType);
+    let result;
+    try {
+      result = await apiStartScan({ target, scanType });
+      actions.scanSuccess(result);
+    } catch (error) {
+      actions.scanError(error.message);
+      return;
+    }
+    // CVE lookups start on their own once the scan is done
+    const hasVersions = (result.hosts || []).some((h) => h.ports.some((p) => p.state === 'open' && p.cpes.length));
+    if (hasVersions) lookUpVulnerabilities(result.hosts);
+  }, [actions, lookUpVulnerabilities]);
 
   const generateAISummary = useCallback(async () => {
     if (!state.scanOutput) return;
-    
+    actions.startAIAnalysis();
     try {
-      actions.startAIAnalysis();
-      const result = await apiGenerateAISummary({ 
-        scanOutput: state.scanOutput, 
-        target: state.target 
-      });
-      actions.aiAnalysisSuccess(result.summary);
+      const data = await apiGenerateAISummary({ scanOutput: state.scanOutput, target: state.target, intel: state.intel });
+      actions.aiAnalysisSuccess(data.summary);
     } catch (error) {
-      console.error('AI analysis failed:', error);
       actions.aiAnalysisError(error.message);
     }
-  }, [state.scanOutput, state.target, actions]);
+  }, [state.scanOutput, state.target, state.intel, actions]);
 
   const downloadReport = useCallback(async () => {
     if (!state.scanOutput || !state.aiSummary) return;
-    
+    actions.startDownload();
     try {
-      actions.startDownload();
-      const blob = await apiDownloadReport({
-        target: state.target,
-        scanOutput: state.scanOutput,
-        aiSummary: state.aiSummary
-      });
-      
-      // Create download link
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nmap-report-${state.target}-${Date.now()}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      
+      const blob = await apiDownloadReport({ target: state.target, scanOutput: state.scanOutput,
+        aiSummary: state.aiSummary, intel: state.intel });
+      const safe = state.target.replace(/[^a-zA-Z0-9.-]/g, '_');
+      await downloadBlob(blob, `netscan-report-${safe}-${Date.now()}.pdf`);
       actions.downloadSuccess();
     } catch (error) {
-      console.error('Download failed:', error);
       actions.downloadError(error.message);
     }
-  }, [state.scanOutput, state.aiSummary, state.target, actions]);
-
-  const resetScan = useCallback(() => {
-    actions.resetScan();
-  }, [actions]);
-
-  const resetAI = useCallback(() => {
-    actions.resetAI();
-  }, [actions]);
-
-  const resetAll = useCallback(() => {
-    actions.resetAll();
-  }, [actions]);
+  }, [state.scanOutput, state.aiSummary, state.target, state.intel, actions]);
 
   return {
-    // State
     state,
-    
-    // Actions
     startScan,
+    lookUpVulnerabilities,
     generateAISummary,
     downloadReport,
-    resetScan,
-    resetAI,
-    resetAll,
-    
-    // Computed values
     canGenerateAI: !!state.scanOutput && !state.isAnalyzing,
     canDownload: !!state.scanOutput && !!state.aiSummary && !state.isDownloading,
-    hasErrors: !!(state.scanError || state.aiError || state.downloadError),
   };
 }

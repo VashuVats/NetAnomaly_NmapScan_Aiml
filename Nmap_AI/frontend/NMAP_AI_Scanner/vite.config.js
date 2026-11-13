@@ -15,8 +15,5 @@ export default defineConfig({
       }
     }
   },
-  define: {
-    // Make environment variables available
-    'process.env': process.env
-  }
+  // Note: never expose process.env here. Only VITE_* variables reach the browser.
 })

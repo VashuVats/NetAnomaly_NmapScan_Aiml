@@ -73,10 +73,14 @@ cp ../env.example .env
 
 # Edit .env and add your Gemini API key
 # GEMINI_API_KEY=your_api_key_here
+# GEMINI_MODEL=gemini-flash-latest
 # NODE_ENV=development
 # PORT=3001
 # ML_API_URL=http://localhost:5000
+# NVD_API_KEY=            (optional, free, makes CVE lookups faster)
 ```
+
+Never commit `.env`. It is in `.gitignore`.
 
 ### 2. Frontend Setup
 
@@ -86,9 +90,11 @@ cd Nmap_AI/frontend/NMAP_AI_Scanner
 # Install dependencies
 npm install
 
-# Create .env file (optional, has defaults)
+# Optional. In development Vite forwards /api to http://localhost:3001 by itself.
 # VITE_API_URL=http://localhost:3001
 ```
+
+The app has a light and a dark theme (switch in the top right; "Auto" follows your system).
 
 ### 3. ML API Setup
 
@@ -108,17 +114,17 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Copy Model Files
+### 4. Model
 
-Make sure the following files exist in the project root:
-- `network_anomaly_detection_model.joblib`
-- `scorer.py`
-
-Copy `scorer.py` to the `ml_api` directory:
+A trained model is already in `Nmap_AI/ml_api/models/netanomaly_model.joblib`.
+If pip installed different scikit-learn or LightGBM versions, retrain it once (about 30 seconds):
 
 ```bash
-cp ../scorer.py Nmap_AI/ml_api/
+cd Nmap_AI/ml_api
+python train.py --dataset nslkdd --data ../../KDD+.txt
 ```
+
+See `Nmap_AI/ml_api/README.md` for training on UWF-ZeekData22 or on your own normal traffic.
 
 ## Running the Application
 
@@ -178,9 +184,9 @@ docker-compose up
 ### Port Already in Use
 
 **Change ML API Port:**
-Edit `Nmap_AI/ml_api/app.py`:
-```python
-app.run(host='0.0.0.0', port=5001, debug=True)  # Change to 5001
+Set an environment variable before starting it:
+```bash
+ML_API_PORT=5001 python app.py
 ```
 
 **Change Backend Port:**
@@ -209,16 +215,14 @@ sudo python app.py
 
 ### Model Not Found
 
-Check that `network_anomaly_detection_model.joblib` exists in:
-```
-../network_anomaly_detection_model.joblib
-```
-(from the ml_api directory)
+Check that `models/netanomaly_model.joblib` exists in `Nmap_AI/ml_api`, or retrain it with
+`python train.py --dataset nslkdd --data ../../KDD+.txt`.
 
 ### Gemini API Errors
 
-1. Get API key from: https://makersuite.google.com/app/apikey
-2. Add to `Nmap_AI/backend/.env`:
+1. Get API key from: https://aistudio.google.com/apikey
+2. If you see "model not available", set `GEMINI_MODEL` in `.env` to a current model name.
+3. Add to `Nmap_AI/backend/.env`:
 ```
 GEMINI_API_KEY=your_key_here
 ```
