@@ -7,14 +7,13 @@ import gzip
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import joblib
-import pandas as pd
-import numpy as np
 import shutil
 import stat
 import re
 import threading
 from shutil import which
+
+from scorer import load_model, score_conn_log
 
 app = Flask(__name__)
 # Only the Node backend and the local frontend should call this API.
@@ -45,31 +44,37 @@ def validate_interface(name):
 BASE_DIR = Path(__file__).parent.resolve()
 PCAP_DIR = (BASE_DIR / 'pcaps')
 RESULTS_DIR = (BASE_DIR / 'results')
-# prefer a saved joblib model in the parent project root (adjust via env if needed)
-MODEL_PATH = BASE_DIR / 'network_anomaly_detection_model.joblib'
+MODEL_PATH = Path(os.environ.get('ML_MODEL_PATH', str(BASE_DIR / 'models' / 'netanomaly_model.joblib')))
 
-# Ensure directories exist (create parents, use absolute paths)
-PCAP_DIR.mkdir(parents=True, exist_ok=True)
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure directories exist
 for d in [PCAP_DIR, RESULTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
-    if os.name != 'nt':  # For Linux/WSL
-        import stat
+    if os.name != 'nt':  # Zeek and tcpdump may run as another user on Linux/WSL
         os.chmod(str(d), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
 
 print(f"Directories initialized:\nPCAPs: {PCAP_DIR}\nResults: {RESULTS_DIR}")
 
-# Load model once at startup (safe load)
+# Load the model once at startup
 model = None
-try:
-    if MODEL_PATH.exists():
-        model = joblib.load(MODEL_PATH)
-        print(f"✅ Model loaded successfully from {MODEL_PATH}")
-    else:
-        print(f"⚠️ Model path does not exist: {MODEL_PATH}")
-except Exception as e:
-    print(f"❌ Error loading model: {e}")
-    model = None
+model_error = None
+
+
+def load_current_model():
+    global model, model_error
+    try:
+        model = load_model(MODEL_PATH)
+        model_error = None
+        print(f"Model loaded from {MODEL_PATH}")
+    except FileNotFoundError:
+        model, model_error = None, (f'Model file not found: {MODEL_PATH}. Train one with: '
+                                    'python train.py --dataset nslkdd --data ../../KDD+.txt')
+        print(model_error)
+    except Exception as e:
+        model, model_error = None, f'Could not load model: {e}'
+        print(model_error)
+
+
+load_current_model()
 
 # Global variable to store tcpdump process
 tcpdump_process = None
@@ -80,6 +85,8 @@ def health():
     return jsonify({
         'status': 'healthy',
         'model_loaded': model is not None,
+        'model_error': model_error,
+        'model': model.info() if model is not None else None,
         'timestamp': time.time()
     })
 
@@ -175,12 +182,17 @@ def stop_tcpdump():
 def score_pcap():
     """Convert PCAP to Zeek logs"""
     try:
-        # Find newest PCAP file
-        pcaps = list(PCAP_DIR.glob('*.pcap'))
-        if not pcaps:
-            return jsonify({'error': 'No PCAP files found'}), 400
-
-        candidate = max(pcaps, key=lambda p: p.stat().st_mtime)
+        # Use the requested capture (by file name, inside PCAP_DIR) or the newest one
+        requested = (request.json or {}).get('pcap_file') if request.is_json else None
+        if requested:
+            candidate = PCAP_DIR / Path(str(requested)).name
+            if not candidate.is_file():
+                return jsonify({'error': f'Capture not found: {candidate.name}'}), 400
+        else:
+            pcaps = list(PCAP_DIR.glob('*.pcap'))
+            if not pcaps:
+                return jsonify({'error': 'No capture files found. Start a capture first.'}), 400
+            candidate = max(pcaps, key=lambda p: p.stat().st_mtime)
 
         # Create unique output directory with timestamp inside RESULTS_DIR
         timestamp = int(time.time())
@@ -270,196 +282,47 @@ def score_pcap():
             'stderr': e.stderr
         }), 500
     except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }), 500
+        app.logger.exception('Zeek step failed')
+        return jsonify({'error': str(e)}), 500
+
+def resolve_conn_log(requested):
+    """Find the conn log to score: the requested one (only inside our folders) or the newest."""
+    roots = [RESULTS_DIR.resolve(), PCAP_DIR.resolve()]
+    if requested:
+        name = Path(str(requested)).name
+        candidates = [Path(str(requested))] + [r / name for r in roots] + list(RESULTS_DIR.glob(f'zeek_*/{name}'))
+        for c in candidates:
+            try:
+                c = c.resolve()
+            except OSError:
+                continue
+            if c.is_file() and any(root in c.parents for root in roots):
+                return c
+        return None
+    logs = list(RESULTS_DIR.glob('zeek_*/conn*.log')) + list(RESULTS_DIR.glob('conn*.log')) + list(PCAP_DIR.glob('conn*.log'))
+    return max(logs, key=lambda p: p.stat().st_mtime).resolve() if logs else None
+
 
 @app.route('/api/analysis/predict', methods=['POST'])
 def predict():
-    """
-    Run scorer.py on a Zeek conn log and (optionally) run the ML model.
-    Returns the JSON printed by scorer.py plus helpful fields.
-    """
+    """Score a Zeek conn log with the model and return a summary, alerts and incidents."""
+    if model is None:
+        return jsonify({'success': False, 'error': model_error or 'Model not loaded'}), 503
+    data = request.json or {}
+    conn_log = resolve_conn_log(data.get('conn_log'))
+    if conn_log is None:
+        return jsonify({'success': False, 'error': 'No conn log found. Capture traffic and run Zeek first.'}), 400
+    output_csv = RESULTS_DIR / f'predictions_{int(time.time())}.csv'
     try:
-        data = request.json or {}
-        conn_log = data.get('conn_log')
-
-        # Resolve conn_log: provided path or newest in results/ or pcaps/
-        candidate = None
-        if conn_log:
-            p = Path(conn_log)
-            print(f"🔍 Looking for conn_log: {p}")
-            if not p.exists():
-                p = (RESULTS_DIR / Path(conn_log).name)
-                print(f"🔍 Trying RESULTS_DIR: {p}")
-            if not p.exists():
-                p = (PCAP_DIR / Path(conn_log).name)
-                print(f"🔍 Trying PCAP_DIR: {p}")
-            if p.exists():
-                candidate = p.resolve()
-                print(f"✅ Found conn_log: {candidate}")
-            else:
-                print(f"❌ conn_log not found: {conn_log}")
-
-        if candidate is None:
-            # Look for conn logs in RESULTS_DIR subdirectories first, then PCAP_DIR
-            conn_files = []
-            
-            print(f"🔍 Searching for conn logs in RESULTS_DIR subdirectories...")
-            # First, look in RESULTS_DIR subdirectories (zeek_* folders)
-            for zeek_dir in RESULTS_DIR.glob('zeek_*'):
-                if zeek_dir.is_dir():
-                    found_logs = list(zeek_dir.glob('conn*.log'))
-                    print(f"🔍 Found {len(found_logs)} logs in {zeek_dir}")
-                    conn_files.extend(found_logs)
-            
-            print(f"🔍 Searching for conn logs directly in RESULTS_DIR...")
-            # Then look directly in RESULTS_DIR
-            direct_logs = list(RESULTS_DIR.glob('conn*.log'))
-            print(f"🔍 Found {len(direct_logs)} logs in RESULTS_DIR")
-            conn_files.extend(direct_logs)
-            
-            # Finally, fallback to PCAP_DIR
-            if not conn_files:
-                print(f"🔍 Searching for conn logs in PCAP_DIR...")
-                conn_files = sorted(list(PCAP_DIR.glob('conn*.log')) + list(PCAP_DIR.glob('conn*.log.*')),
-                                    key=lambda p: p.stat().st_mtime, reverse=True)
-                print(f"🔍 Found {len(conn_files)} logs in PCAP_DIR")
-            
-            if not conn_files:
-                print("❌ No conn logs found anywhere!")
-                return jsonify({'success': False, 'error': 'No conn log found on server'}), 400
-            
-            # Sort by modification time and pick newest
-            conn_files = sorted(conn_files, key=lambda p: p.stat().st_mtime, reverse=True)
-            candidate = conn_files[0].resolve()
-            print(f"✅ Selected newest conn_log: {candidate}")
-
-        if not candidate.exists():
-            return jsonify({'success': False, 'error': f'conn log not found: {str(candidate)}'}), 400
-
-        # Prepare scorer command
-        timestamp = int(time.time())
-        output_csv = RESULTS_DIR / f'predictions_{timestamp}.csv'
-        scorer_py = Path(__file__).parent / 'scorer.py'
-        if not scorer_py.exists():
-            return jsonify({'success': False, 'error': f'scorer.py not found at {scorer_py}'}), 500
-
-        cmd = [
-            sys.executable,
-            str(scorer_py),
-            '--zeek_conn', str(candidate),
-            '--output', str(output_csv)
-        ]
-        # include model if present
-        if MODEL_PATH and Path(MODEL_PATH).exists():
-            cmd += ['--model', str(MODEL_PATH)]
-
-        # Run scorer.py and capture stdout (it returns JSON)
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        stdout = (proc.stdout or '').strip()
-        stderr = (proc.stderr or '').strip()
-
-        # Attempt to parse JSON output
-        parsed = None
-        try:
-            # scorer.py prints a single JSON object to stdout
-            parsed = json.loads(stdout) if stdout else {}
-        except Exception:
-            parsed = {'raw_stdout': stdout, 'raw_stderr': stderr}
-
-        # Add helpful metadata
-        parsed_meta = {
-            'success': proc.returncode == 0,
-            'returncode': proc.returncode,
-            'scorer_stdout': stdout[:4000],
-            'scorer_stderr': stderr[:4000],
-            'zeek_conn': str(candidate),
-            'output_csv': str(output_csv),
-        }
-        # merge parsed (preferring parsed keys)
-        if isinstance(parsed, dict):
-            parsed_meta.update(parsed)
-        else:
-            parsed_meta['scorer_output'] = parsed
-
-        # If scorer wrote the CSV, ensure it exists and analyze results
-        if output_csv.exists():
-            parsed_meta['output_csv'] = str(output_csv)
-            
-            # Analyze the CSV results to provide meaningful statistics
-            try:
-                df = pd.read_csv(output_csv)
-                
-                # Calculate statistics
-                total_records = len(df)
-                normal_count = len(df[df['predicted_class'] == 0]) if 'predicted_class' in df.columns else 0
-                attack_count = len(df[df['predicted_class'] != 0]) if 'predicted_class' in df.columns else 0
-                
-                # High confidence alerts (only for attack classes with confidence > 0.8)
-                high_conf_alerts = 0
-                if 'confidence' in df.columns and 'predicted_class' in df.columns:
-                    # Only count as high confidence alerts if:
-                    # 1. It's an attack (predicted_class != 0)
-                    # 2. Confidence is truly high (> 0.8)
-                    attack_records = df[df['predicted_class'] != 0]
-                    high_conf_alerts = len(attack_records[attack_records['confidence'] > 0.8])
-                
-                # Attack type breakdown
-                attack_breakdown = {}
-                if 'predicted_class' in df.columns:
-                    attack_types = df[df['predicted_class'] != 0]['predicted_class'].value_counts()
-                    # Must match the training notebook: 3 = Privilege (U2R), 4 = Access (R2L)
-                    attack_type_names = {0: 'Normal', 1: 'DoS', 2: 'Probe', 3: 'U2R', 4: 'R2L'}
-                    attack_breakdown = {attack_type_names.get(k, f'Class_{k}'): int(v) for k, v in attack_types.items()}
-                
-                # Calculate confidence statistics
-                avg_confidence = float(df['confidence'].mean()) if 'confidence' in df.columns else 0.0
-                max_confidence = float(df['confidence'].max()) if 'confidence' in df.columns else 0.0
-                
-                # Count confidence levels for normal traffic
-                normal_high_conf = 0
-                normal_medium_conf = 0
-                normal_low_conf = 0
-                
-                if 'confidence' in df.columns and 'predicted_class' in df.columns:
-                    normal_records = df[df['predicted_class'] == 0]
-                    if len(normal_records) > 0:
-                        normal_high_conf = len(normal_records[normal_records['confidence'] > 0.8])
-                        normal_medium_conf = len(normal_records[(normal_records['confidence'] >= 0.6) & (normal_records['confidence'] <= 0.8)])
-                        normal_low_conf = len(normal_records[normal_records['confidence'] < 0.6])
-
-                # Add calculated statistics to response
-                parsed_meta.update({
-                    'total_records': int(total_records),
-                    'normal': int(normal_count),
-                    'attacks': int(attack_count),
-                    'high_confidence_alerts': int(high_conf_alerts),
-                    'attack_breakdown': attack_breakdown,
-                    'avg_confidence': avg_confidence,
-                    'max_confidence': max_confidence,
-                    'normal_high_conf': int(normal_high_conf),
-                    'normal_medium_conf': int(normal_medium_conf),
-                    'normal_low_conf': int(normal_low_conf)
-                })
-                
-            except Exception as e:
-                parsed_meta['analysis_error'] = f'Failed to analyze CSV results: {str(e)}'
-        else:
-            # if scorer reported a different output path, include it
-            if 'output_csv' in parsed_meta and Path(parsed_meta['output_csv']).exists():
-                parsed_meta['output_csv'] = parsed_meta['output_csv']
-            else:
-                parsed_meta['warning'] = 'Output CSV not found after scorer run'
-
-        status_code = 200 if proc.returncode == 0 else 500
-        return jsonify(parsed_meta), status_code
-
+        summary = score_conn_log(conn_log, model, output_csv)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e), 'zeek_conn': conn_log.name}), 400
     except Exception as e:
-        import traceback
-        return jsonify({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}), 500
+        app.logger.exception('Scoring failed')
+        return jsonify({'success': False, 'error': f'Scoring failed: {e}'}), 500
+    summary['zeek_conn'] = str(conn_log)
+    summary['output_csv'] = output_csv.name
+    return jsonify(summary)
 
 @app.route('/api/analysis/download/<filename>', methods=['GET'])
 def download_file(filename):
@@ -530,16 +393,11 @@ def list_files():
 
 @app.route('/api/analysis/reload-model', methods=['POST'])
 def reload_model():
-    """Reload joblib model from disk (admin)"""
-    global model, MODEL_PATH
-    try:
-        path = Path(os.environ.get('ML_MODEL_PATH', str(MODEL_PATH)))
-        if not path.exists():
-            return jsonify({'success': False, 'error': f'Model file not found: {path}'}), 400
-        model = joblib.load(path)
-        return jsonify({'success': True, 'message': f'Model reloaded from {path}'}), 200
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    """Reload the model from disk after retraining."""
+    load_current_model()
+    if model is None:
+        return jsonify({'success': False, 'error': model_error}), 500
+    return jsonify({'success': True, 'model': model.info()})
 
 if __name__ == '__main__':
     print("🚀 Starting ML API Server...")
