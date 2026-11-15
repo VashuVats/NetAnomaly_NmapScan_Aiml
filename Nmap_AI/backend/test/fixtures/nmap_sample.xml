@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -F -sV --version-light -T4 -oX - scanme.example" start="1700000000" startstr="Tue Nov 14 22:13:20 2023" version="7.94" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="100" services="7,9,13,21-23,25-26,37,53,79-81,88,106,110-111,113,119,135,139,143-144,179,199,389,427,443-445,465,513-515,543-544,548,554,587,631,646,873,990,993,995,1025-1029,1110,1433,1720,1723,1755,1900,2000-2001,2049,2121,2717,3000,3128,3306,3389,3986,4899,5000,5009,5051,5060,5101,5190,5357,5432,5631,5666,5800,5900,6000-6001,6646,7070,8000,8008-8009,8080-8081,8443,8888,9100,9999-10000,32768,49152-49157"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<host starttime="1700000001" endtime="1700000012"><status state="up" reason="syn-ack" reason_ttl="0"/>
+<address addr="45.33.32.156" addrtype="ipv4"/>
+<hostnames>
+<hostname name="scanme.example" type="user"/>
+<hostname name="scanme.example" type="PTR"/>
+</hostnames>
+<ports><extraports state="closed" count="96">
+<extrareasons reason="conn-refused" count="96" proto="tcp" ports="7,9,13"/>
+</extraports>
+<port protocol="tcp" portid="22"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="ssh" product="OpenSSH" version="6.6.1p1 Ubuntu 2ubuntu2.13" extrainfo="Ubuntu Linux; protocol 2.0" ostype="Linux" method="probed" conf="10"><cpe>cpe:/a:openbsd:openssh:6.6.1p1</cpe><cpe>cpe:/o:linux:linux_kernel</cpe></service></port>
+<port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="Apache httpd" version="2.4.49" extrainfo="(Ubuntu)" method="probed" conf="10"><cpe>cpe:/a:apache:http_server:2.4.49</cpe></service></port>
+<port protocol="tcp" portid="9929"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="nping-echo" product="Nping echo" method="probed" conf="10"/></port>
+<port protocol="tcp" portid="31337"><state state="filtered" reason="no-response" reason_ttl="0"/><service name="Elite" method="table" conf="3"/></port>
+</ports>
+<times srtt="190000" rttvar="5000" to="210000"/>
+</host>
+<host starttime="1700000001" endtime="1700000012"><status state="up" reason="conn-refused" reason_ttl="0"/>
+<address addr="192.168.1.10" addrtype="ipv4"/>
+<address addr="00:11:22:33:44:55" addrtype="mac" vendor="Example"/>
+<hostnames/>
+<ports><port protocol="tcp" portid="443"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="nginx" version="1.18.0" tunnel="ssl" method="probed" conf="10"><cpe>cpe:/a:igor_sysoev:nginx:1.18.0</cpe></service></port>
+</ports>
+</host>
+<runstats><finished time="1700000012" timestr="Tue Nov 14 22:13:32 2023" summary="Nmap done at Tue Nov 14 22:13:32 2023; 2 IP addresses (2 hosts up) scanned in 11.50 seconds" elapsed="11.50" exit="success"/><hosts up="2" down="0" total="2"/>
+</runstats>
+</nmaprun>

@@ -1,11 +1,16 @@
 const { spawn } = require('child_process');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
 const { isValidTarget } = require('../utils/validator');
+const { parseNmapXml } = require('../utils/nmapXml');
 
-// Map scan type -> args
+// Map scan type -> args. -sV (service versions) is what makes CVE lookups possible.
 const scanOptions = {
-  basic: ['-F', '-T4'],
-  aggressive: ['-A', '-T4'],
-  passive: ['-sS', '-T3', '-Pn'],
+  basic: ['-F', '-sV', '--version-light', '-T4'],      // top 100 ports, quick version check
+  aggressive: ['-A', '-T4'],                          // versions, OS, default scripts, traceroute
+  passive: ['-sS', '-T3', '-Pn'],                     // stealthy SYN scan, no versions (needs root)
 };
 
 exports.runScan = async (req, res) => {
@@ -35,11 +40,25 @@ exports.runScan = async (req, res) => {
 
   try {
     console.log(`Starting ${scanType} scan for target: ${target}`);
-    const output = await runNmap([...scanOptions[scanType], target]);
-    
+    const xmlFile = path.join(os.tmpdir(), `netscan-${crypto.randomUUID()}.xml`);
+    let output;
+    let parsed = { hosts: [], stats: null };
+    try {
+      output = await runNmap([...scanOptions[scanType], '-oX', xmlFile, target]);
+      try {
+        parsed = parseNmapXml(await fs.readFile(xmlFile, 'utf8'));
+      } catch (parseErr) {
+        console.warn('Could not read nmap XML output:', parseErr.message);
+      }
+    } finally {
+      fs.unlink(xmlFile).catch(() => {});
+    }
+
     console.log(`Scan completed for target: ${target}`);
-    return res.json({ 
+    return res.json({
       scanOutput: output,
+      hosts: parsed.hosts,
+      stats: parsed.stats,
       target,
       scanType,
       timestamp: new Date().toISOString()
@@ -65,16 +84,22 @@ function runNmap(args) {
     p.stdout.on('data', d => out += d.toString());
     p.stderr.on('data', d => err += d.toString());
 
-    p.on('close', code => {
-      if (code === 0 || out) resolve(out);
-      else reject(new Error(err || 'Unknown error'));
-    });
-
     // Timeout after 5 minutes
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       p.kill();
       reject(new Error('Scan timeout - operation took too long'));
     }, 300000);
+
+    p.on('error', e => {
+      clearTimeout(timer);
+      reject(new Error(e.code === 'ENOENT' ? 'nmap is not installed or not in PATH' : e.message));
+    });
+
+    p.on('close', code => {
+      clearTimeout(timer);
+      if (code === 0 || out) resolve(out);
+      else reject(new Error(err || 'Unknown error'));
+    });
   });
 }
 

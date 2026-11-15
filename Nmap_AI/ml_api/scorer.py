@@ -1,219 +1,177 @@
 """
-scorer.py
-- Parses Zeek conn.* logs (handles #fields header)
-- Produces a CSV of parsed records (output)
-- Optionally loads a joblib model and predicts (adds predicted_class, confidence)
-- CLI: --zeek_conn <path> --model <path> --output <path>
+scorer.py - score a Zeek conn log with the NetAnomaly model.
+
+  python scorer.py --zeek_conn results/zeek_123/conn.log --output predictions.csv
+
+Prints one JSON object with the summary. The same logic is used by the
+Flask API (app.py imports score_conn_log).
 """
-from pathlib import Path
+from __future__ import annotations
+
 import argparse
-import joblib
-import pandas as pd
-import numpy as np
-import sys
 import json
+import sys
+from pathlib import Path
 
-# ---------- CONFIG ----------
-WINDOW_SECONDS = 2.0
-ALERT_PROB_THRESHOLD = 0.6
-NUMERIC_FEATURES = [
-    'duration','src_bytes','dst_bytes','wrong_fragment','urgent','hot',
-    'num_failed_logins','num_compromised','root_shell','su_attempted',
-    'num_root','num_file_creations','num_shells','num_access_files',
-    'num_outbound_cmds','count','srv_count','serror_rate',
-    'srv_serror_rate','rerror_rate','srv_rerror_rate','same_srv_rate',
-    'diff_srv_rate','srv_diff_host_rate','dst_host_count','dst_host_srv_count',
-    'dst_host_same_srv_rate','dst_host_diff_srv_rate',
-    'dst_host_same_src_port_rate','dst_host_srv_diff_host_rate',
-    'dst_host_serror_rate','dst_host_srv_serror_rate','dst_host_rerror_rate',
-    'dst_host_srv_rerror_rate'
-]
-CATEGORICAL_BASE = ['protocol_type', 'service', 'flag']
-# ----------------------------
+import joblib
+import numpy as np
+import pandas as pd
 
-def read_zeek_conn(path):
-    """
-    Read Zeek conn.* log and return DataFrame.
-    Handles header lines and '#fields' declaration.
-    """
-    fields = None
-    rows = []
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
-        for ln in f:
-            if ln.startswith('#fields'):
-                # strip '#fields' and split by tab
-                parts = ln.strip().split('\t')
-                # first token is '#fields'
-                fields = parts[1:]
-                continue
-            if ln.startswith('#'):
-                continue
-            if not fields:
-                continue
-            parts = ln.rstrip('\n').split('\t')
-            if len(parts) != len(fields):
-                # tolerate mismatched lines by padding/truncating
-                if len(parts) < len(fields):
-                    parts += [''] * (len(fields) - len(parts))
-                else:
-                    parts = parts[:len(fields)]
-            rows.append(parts)
-    if not fields:
-        raise ValueError("No '#fields' header found in conn log")
-    df = pd.DataFrame(rows, columns=fields)
-    # Try to coerce numeric columns where possible
-    for col in ['duration','orig_bytes','resp_bytes','orig_pkts','resp_pkts','orig_ip_bytes','resp_ip_bytes']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col].replace('-', np.nan), errors='coerce').fillna(0)
-    return df
+from features import conn_to_features, read_zeek_conn
+from model import MODEL_FORMAT_VERSION, NetAnomalyModel
 
-def build_feature_dataframe(conn_df):
-    """
-    Build a feature DataFrame matching NUMERIC_FEATURES + one-hot of categoricals.
-    Missing numeric features are filled with 0.
-    """
-    feat = pd.DataFrame(index=conn_df.index)
-    # map basics
-    # duration
-    if 'duration' in conn_df.columns:
-        feat['duration'] = conn_df['duration'].astype(float)
-    else:
-        feat['duration'] = 0.0
-    # bytes
-    feat['src_bytes'] = conn_df['orig_bytes'] if 'orig_bytes' in conn_df.columns else 0
-    feat['dst_bytes'] = conn_df['resp_bytes'] if 'resp_bytes' in conn_df.columns else 0
+DEFAULT_MODEL_PATH = Path(__file__).parent / 'models' / 'netanomaly_model.joblib'
+HIGH_CONFIDENCE = 0.8
+MAX_ALERTS_RETURNED = 50
 
-    # fill any other numeric features with zeros
-    for n in NUMERIC_FEATURES:
-        if n not in feat.columns:
-            feat[n] = 0
+CONN_COLUMNS_OUT = {'ts': 'ts', 'uid': 'uid', 'id.orig_h': 'src_ip', 'id.orig_p': 'src_port',
+                    'id.resp_h': 'dst_ip', 'id.resp_p': 'dst_port', 'proto': 'proto',
+                    'service': 'zeek_service', 'conn_state': 'conn_state'}
 
-    # categorical base
-    proto_col = conn_df['proto'] if 'proto' in conn_df.columns else None
-    svc_col = conn_df['service'] if 'service' in conn_df.columns else None
-    flag_col = conn_df['conn_state'] if 'conn_state' in conn_df.columns else None
 
-    cats = pd.DataFrame(index=conn_df.index)
-    if proto_col is not None:
-        cats['protocol_type'] = proto_col.fillna('-')
-    if svc_col is not None:
-        cats['service'] = svc_col.fillna('-')
-    if flag_col is not None:
-        cats['flag'] = flag_col.fillna('-')
+def load_model(path=DEFAULT_MODEL_PATH) -> NetAnomalyModel:
+    model = joblib.load(path)
+    if not isinstance(model, NetAnomalyModel) or getattr(model, 'format_version', 0) != MODEL_FORMAT_VERSION:
+        raise ValueError(f'{path} is not a NetAnomaly model (format {MODEL_FORMAT_VERSION}). '
+                         'Retrain it with: python train.py --dataset nslkdd --data ../../KDD+.txt')
+    trained = (model.metadata or {}).get('versions', {})
+    import lightgbm, sklearn
+    for name, now in (('scikit-learn', sklearn.__version__), ('lightgbm', lightgbm.__version__)):
+        if trained.get(name) and trained[name] != now:
+            print(f'Warning: model was trained with {name} {trained[name]} but {now} is installed. '
+                  'If results look wrong, retrain with train.py.', file=sys.stderr)
+    return model
 
-    if not cats.empty:
-        dummies = pd.get_dummies(cats.astype(str), dummy_na=False)
-        # combine numeric + dummies
-        final = pd.concat([feat, dummies], axis=1)
-    else:
-        final = feat.copy()
-    # ensure no infinite or NaN
-    final = final.replace([np.inf, -np.inf], 0).fillna(0)
-    return final
 
-def align_features_with_model(X, model):
-    """
-    Try to align X columns with model expected features.
-    Uses model.feature_names_in_ when available.
-    Returns X_aligned or raises ValueError.
-    """
-    if hasattr(model, 'feature_names_in_'):
-        expected = list(model.feature_names_in_)
-        missing = [c for c in expected if c not in X.columns]
-        for m in missing:
-            X[m] = 0
-        # drop extras
-        X = X.reindex(columns=expected, fill_value=0)
-        return X[expected]
-    # fallback: if model has n_features_in_, attempt to trim/pad
-    if hasattr(model, 'n_features_in_'):
-        n = model.n_features_in_
-        if X.shape[1] == n:
-            return X
-        # if fewer, pad zeros with generic names (best-effort)
-        if X.shape[1] < n:
-            for i in range(n - X.shape[1]):
-                X[f'_pad_{i}'] = 0
-            return X.iloc[:, :n]
-        # if more, drop right-most columns
-        return X.iloc[:, :n]
-    # last fallback: return X as-is
-    return X
+def _clean(value):
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return None if np.isnan(value) else float(value)
+    if isinstance(value, float) and np.isnan(value):
+        return None
+    return value
 
-def main():
-    parser = argparse.ArgumentParser(description='Score Zeek conn log with ML model')
-    parser.add_argument('--zeek_conn', required=True, help='Path to Zeek conn log (can be conn.log or conn_*.log)')
-    parser.add_argument('--model', required=False, help='Path to joblib model (optional)')
-    parser.add_argument('--output', required=False, help='Output CSV path (default: predictions.csv)', default='predictions.csv')
-    args = parser.parse_args()
 
-    zeek_path = Path(args.zeek_conn)
-    if not zeek_path.exists():
-        print(json.dumps({'error':'zeek_conn not found','path':str(zeek_path)}))
-        sys.exit(2)
+def score_conn_log(conn_path, model: NetAnomalyModel, output_csv=None):
+    """Score one conn log. Returns a JSON-ready summary dict."""
+    conn = read_zeek_conn(conn_path)
+    if conn.empty:
+        return {'success': True, 'total_records': 0, 'normal': 0, 'attacks': 0, 'anomalies': 0,
+                'high_confidence_alerts': 0, 'attack_breakdown': {}, 'alerts': [],
+                'avg_confidence': 0.0, 'max_confidence': 0.0, 'model': model.info(),
+                'warning': 'The conn log has no connections. Try a longer capture.'}
+    conn = conn.reset_index(drop=True)
+    feats = conn_to_features(conn)
+    pred = model.predict(feats)
 
+    is_attack = pred['predicted_label'] != 'Normal'
+    alert_mask = is_attack | pred['is_anomaly']
+    severity = np.where(is_attack, 1.0 + pred['confidence'], pred['anomaly_score'] / max(model.anomaly_threshold, 1e-9) * 0.5)
+    pred['severity'] = severity
+
+    # Explanations only for rows that raised an alert (they are the ones people read)
+    pred['reasons'] = [[] for _ in range(len(pred))]
+    attack_idx = pred.index[is_attack]
+    if len(attack_idx):
+        reasons = model.explain_prediction(feats.loc[attack_idx], pred.loc[attack_idx, 'predicted_label'].tolist())
+        for i, r in zip(attack_idx, reasons):
+            pred.at[i, 'reasons'] = r
+    anomaly_only_idx = pred.index[pred['is_anomaly'] & ~is_attack]
+    if len(anomaly_only_idx):
+        for i, r in zip(anomaly_only_idx, model.explain_anomaly(feats.loc[anomaly_only_idx])):
+            pred.at[i, 'reasons'] = r
+
+    meta = pd.DataFrame({out: conn[col] if col in conn else None for col, out in CONN_COLUMNS_OUT.items()})
+    table = pd.concat([meta, feats, pred], axis=1)
+
+    if output_csv:
+        csv = table.copy()
+        csv['reasons'] = csv['reasons'].map(lambda rs: '; '.join(f"{r['description']}: {r['value']}" for r in rs))
+        csv.to_csv(output_csv, index=False)
+
+    alerts_df = table[alert_mask].sort_values('severity', ascending=False).head(MAX_ALERTS_RETURNED)
+    alerts = []
+    for _, row in alerts_df.iterrows():
+        alerts.append({
+            'ts': _clean(row['ts']), 'uid': _clean(row['uid']),
+            'src_ip': _clean(row['src_ip']), 'src_port': _clean(row['src_port']),
+            'dst_ip': _clean(row['dst_ip']), 'dst_port': _clean(row['dst_port']),
+            'proto': _clean(row['proto']), 'service': row['service'],
+            'label': row['predicted_label'] if row['predicted_label'] != 'Normal' else 'Unusual',
+            'kind': 'known_attack' if row['predicted_label'] != 'Normal' else 'anomaly',
+            'confidence': round(float(row['confidence']), 4),
+            'anomaly_score': round(float(row['anomaly_score']), 4),
+            'reasons': row['reasons'],
+        })
+
+    incidents = group_incidents(table[alert_mask])
+
+    breakdown = pred.loc[is_attack, 'predicted_label'].value_counts()
+    normal_rows = pred[~is_attack]
+    return {
+        'success': True,
+        'total_records': int(len(pred)),
+        'normal': int((~is_attack).sum()),
+        'attacks': int(is_attack.sum()),
+        'anomalies': int(pred['is_anomaly'].sum()),
+        'anomalies_not_known_attack': int(len(anomaly_only_idx)),
+        'high_confidence_alerts': int((is_attack & (pred['confidence'] > HIGH_CONFIDENCE)).sum()),
+        'attack_breakdown': {str(k): int(v) for k, v in breakdown.items()},
+        'avg_confidence': float(pred['confidence'].mean()),
+        'max_confidence': float(pred['confidence'].max()),
+        'normal_high_conf': int((normal_rows['confidence'] > 0.8).sum()),
+        'normal_medium_conf': int(((normal_rows['confidence'] >= 0.6) & (normal_rows['confidence'] <= 0.8)).sum()),
+        'normal_low_conf': int((normal_rows['confidence'] < 0.6).sum()),
+        'alerts': alerts,
+        'incidents': incidents,
+        'alerts_total': int(alert_mask.sum()),
+        'output_csv': str(output_csv) if output_csv else None,
+        'model': model.info(),
+    }
+
+
+def group_incidents(alert_rows: pd.DataFrame, limit=20):
+    """Group alerts by (label, target host) so a scan of 300 ports is one line, not 300."""
+    if alert_rows.empty:
+        return []
+    rows = alert_rows.copy()
+    rows['label'] = rows['predicted_label'].where(rows['predicted_label'] != 'Normal', 'Unusual')
+    incidents = []
+    for (label, dst), g in rows.groupby(['label', 'dst_ip'], dropna=False):
+        top = g.sort_values('severity', ascending=False).iloc[0]
+        incidents.append({
+            'label': label,
+            'kind': 'anomaly' if label == 'Unusual' else 'known_attack',
+            'dst_ip': _clean(dst),
+            'connections': int(len(g)),
+            'sources': int(g['src_ip'].nunique()),
+            'top_sources': [str(x) for x in g['src_ip'].value_counts().head(3).index],
+            'ports': int(g['dst_port'].nunique()),
+            'first_ts': _clean(g['ts'].min()), 'last_ts': _clean(g['ts'].max()),
+            'max_confidence': round(float(g['confidence'].max()), 4),
+            'severity': round(float(g['severity'].max()), 4),
+            'reasons': top['reasons'],
+        })
+    incidents.sort(key=lambda x: (x['severity'], x['connections']), reverse=True)
+    return incidents[:limit]
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description='Score a Zeek conn log with the NetAnomaly model')
+    ap.add_argument('--zeek_conn', required=True, help='Path to a Zeek conn log (TSV or JSON)')
+    ap.add_argument('--model', default=str(DEFAULT_MODEL_PATH))
+    ap.add_argument('--output', default='predictions.csv', help='Where to write the per-connection CSV')
+    args = ap.parse_args(argv)
     try:
-        conn_df = read_zeek_conn(str(zeek_path))
-    except Exception as e:
-        print(json.dumps({'error':'failed_to_read_conn', 'message': str(e)}))
-        sys.exit(3)
+        model = load_model(args.model)
+        summary = score_conn_log(args.zeek_conn, model, args.output)
+    except Exception as e:  # print JSON so callers can always parse the output
+        print(json.dumps({'success': False, 'error': str(e)}))
+        return 1
+    print(json.dumps(summary, default=_clean))
+    return 0
 
-    # Save raw parsed CSV first
-    out_path = Path(args.output)
-    # build features
-    X = build_feature_dataframe(conn_df)
-
-    # Save feature CSV (so frontend/backend can inspect)
-    try:
-        X.to_csv(out_path, index=False)
-    except Exception as e:
-        print(json.dumps({'error':'failed_to_write_csv','message':str(e)}))
-        sys.exit(4)
-
-    result_obj = {'output_csv': str(out_path), 'n_records': int(len(X))}
-    # if model provided, attempt prediction
-    if args.model:
-        model_path = Path(args.model)
-        if not model_path.exists():
-            result_obj['model_error'] = f'model not found: {model_path}'
-            print(json.dumps(result_obj))
-            sys.exit(0)
-        try:
-            model = joblib.load(str(model_path))
-        except Exception as e:
-            result_obj['model_error'] = f'failed to load model: {e}'
-            print(json.dumps(result_obj))
-            sys.exit(0)
-
-        try:
-            Xp = align_features_with_model(X.copy(), model)
-            preds = None
-            confidences = None
-            # use predict_proba if available
-            if hasattr(model, 'predict_proba'):
-                probs = model.predict_proba(Xp)
-                # choose class with max prob and max prob as confidence
-                idx = np.argmax(probs, axis=1)
-                preds = model.classes_[idx] if hasattr(model, 'classes_') else model.predict(Xp)
-                confidences = probs[np.arange(len(idx)), idx]
-            else:
-                preds = model.predict(Xp)
-                # no proba: confidence based on trees (if forest has predict_proba through wrapper)
-                confidences = np.full(len(preds), 0.0)
-
-            # attach to CSV
-            out_df = X.copy()
-            out_df['predicted_class'] = preds
-            out_df['confidence'] = confidences
-            out_df.to_csv(out_path, index=False)
-
-            result_obj['predictions'] = str(out_path)
-            result_obj['pred_count'] = int(len(out_df))
-        except Exception as e:
-            result_obj['model_error'] = f'prediction_failed: {e}'
-
-    print(json.dumps(result_obj))
-    sys.exit(0)
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

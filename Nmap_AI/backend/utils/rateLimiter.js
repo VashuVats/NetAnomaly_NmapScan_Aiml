@@ -4,7 +4,8 @@ const RATE_LIMIT_WINDOW = 15 * 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
 
 exports.rateLimiter = (req, res, next) => {
-  const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
+  // Count each API area separately, so a scan does not use up the AI summary allowance
+  const clientIP = `${req.baseUrl || ''}:${req.ip || (req.socket && req.socket.remoteAddress) || 'unknown'}`;
   const now = Date.now();
   
   // Clean up old entries
@@ -55,4 +56,4 @@ setInterval(() => {
       rateLimitMap.delete(ip);
     }
   }
-}, 5 * 60 * 1000); // Clean up every 5 minutes
+}, 5 * 60 * 1000).unref(); // Clean up every 5 minutes (unref: do not keep the process alive)

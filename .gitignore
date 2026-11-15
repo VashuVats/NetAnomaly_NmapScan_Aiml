@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Secrets (copy Nmap_AI/env.example to .env and fill it in)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Runtime data made by the ML API (captures, Zeek logs, predictions)
+Nmap_AI/ml_api/pcaps/
+Nmap_AI/ml_api/results/
+
+# Large training data (download it, see Nmap_AI/ml_api/README.md)
+Nmap_AI/ml_api/data/
+
+# Build output and editor files
+dist/
+.DS_Store
+.vscode/
+.idea/

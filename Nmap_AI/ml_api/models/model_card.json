@@ -1,0 +1,410 @@
+{
+  "model_used": "lightgbm",
+  "name": "NetAnomaly LightGBM + Isolation Forest",
+  "dataset": "nslkdd",
+  "data_file": "KDD+.txt",
+  "split": "Official split: the first 125,973 rows of KDD+.txt are KDDTrain+ (training), the last 22,544 rows are KDDTest+ (testing).",
+  "trained_at": "2026-11-13 09:51:06",
+  "train_rows": 125973,
+  "test_rows": 22544,
+  "features": [
+    "protocol_type",
+    "service",
+    "flag",
+    "duration",
+    "src_bytes",
+    "dst_bytes",
+    "land",
+    "count",
+    "srv_count",
+    "serror_rate",
+    "srv_serror_rate",
+    "rerror_rate",
+    "srv_rerror_rate",
+    "same_srv_rate",
+    "diff_srv_rate",
+    "srv_diff_host_rate",
+    "dst_host_count",
+    "dst_host_srv_count",
+    "dst_host_same_srv_rate",
+    "dst_host_diff_srv_rate",
+    "dst_host_same_src_port_rate",
+    "dst_host_srv_diff_host_rate",
+    "dst_host_serror_rate",
+    "dst_host_srv_serror_rate",
+    "dst_host_rerror_rate",
+    "dst_host_srv_rerror_rate"
+  ],
+  "anomaly_baseline": "53,874 normal connections from the training data",
+  "anomaly_threshold_quantile": 0.99,
+  "versions": {
+    "python": "3.13.18",
+    "scikit-learn": "1.9.1",
+    "lightgbm": "4.7.0",
+    "pandas": "3.1.1",
+    "numpy": "2.5.4"
+  },
+  "test_summary": {
+    "accuracy": 0.7724,
+    "macro_f1": 0.542,
+    "false_positive_rate": 0.0292,
+    "attack_detection_rate": 0.6455,
+    "calibration_error": 0.2157
+  },
+  "results": {
+    "random_forest": {
+      "accuracy": 0.7612,
+      "macro_f1": 0.5185,
+      "weighted_f1": 0.7246,
+      "false_positive_rate": 0.0262,
+      "attack_detection_rate": 0.62,
+      "per_class": {
+        "Normal": {
+          "precision": 0.6598,
+          "recall": 0.9738,
+          "f1": 0.7866,
+          "support": 9711
+        },
+        "DoS": {
+          "precision": 0.9634,
+          "recall": 0.805,
+          "f1": 0.8771,
+          "support": 7458
+        },
+        "Probe": {
+          "precision": 0.8416,
+          "recall": 0.5989,
+          "f1": 0.6998,
+          "support": 2421
+        },
+        "R2L": {
+          "precision": 0.9918,
+          "recall": 0.0882,
+          "f1": 0.1621,
+          "support": 2754
+        },
+        "U2R": {
+          "precision": 0.7,
+          "recall": 0.035,
+          "f1": 0.0667,
+          "support": 200
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "Normal",
+          "DoS",
+          "Probe",
+          "R2L",
+          "U2R"
+        ],
+        "matrix": [
+          [
+            9457,
+            66,
+            185,
+            1,
+            2
+          ],
+          [
+            1368,
+            6004,
+            86,
+            0,
+            0
+          ],
+          [
+            809,
+            162,
+            1450,
+            0,
+            0
+          ],
+          [
+            2508,
+            0,
+            2,
+            243,
+            1
+          ],
+          [
+            192,
+            0,
+            0,
+            1,
+            7
+          ]
+        ]
+      }
+    },
+    "random_forest_random_split": {
+      "accuracy": 0.9988,
+      "macro_f1": 0.849,
+      "weighted_f1": 0.9987,
+      "false_positive_rate": 0.0007,
+      "attack_detection_rate": 0.9984,
+      "per_class": {
+        "Normal": {
+          "precision": 0.9986,
+          "recall": 0.9993,
+          "f1": 0.999,
+          "support": 13469
+        },
+        "DoS": {
+          "precision": 0.9998,
+          "recall": 1.0,
+          "f1": 0.9999,
+          "support": 9186
+        },
+        "Probe": {
+          "precision": 0.9991,
+          "recall": 0.9979,
+          "f1": 0.9985,
+          "support": 2331
+        },
+        "R2L": {
+          "precision": 0.9694,
+          "recall": 0.9548,
+          "f1": 0.962,
+          "support": 199
+        },
+        "U2R": {
+          "precision": 0.5,
+          "recall": 0.2,
+          "f1": 0.2857,
+          "support": 10
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "Normal",
+          "DoS",
+          "Probe",
+          "R2L",
+          "U2R"
+        ],
+        "matrix": [
+          [
+            13460,
+            2,
+            2,
+            4,
+            1
+          ],
+          [
+            0,
+            9186,
+            0,
+            0,
+            0
+          ],
+          [
+            5,
+            0,
+            2326,
+            0,
+            0
+          ],
+          [
+            8,
+            0,
+            0,
+            190,
+            1
+          ],
+          [
+            6,
+            0,
+            0,
+            2,
+            2
+          ]
+        ]
+      }
+    },
+    "lightgbm": {
+      "accuracy": 0.7724,
+      "macro_f1": 0.542,
+      "weighted_f1": 0.7372,
+      "false_positive_rate": 0.0292,
+      "attack_detection_rate": 0.6455,
+      "per_class": {
+        "Normal": {
+          "precision": 0.6745,
+          "recall": 0.9708,
+          "f1": 0.796,
+          "support": 9711
+        },
+        "DoS": {
+          "precision": 0.9628,
+          "recall": 0.8262,
+          "f1": 0.8893,
+          "support": 7458
+        },
+        "Probe": {
+          "precision": 0.821,
+          "recall": 0.6344,
+          "f1": 0.7158,
+          "support": 2421
+        },
+        "R2L": {
+          "precision": 0.9928,
+          "recall": 0.0999,
+          "f1": 0.1815,
+          "support": 2754
+        },
+        "U2R": {
+          "precision": 0.7,
+          "recall": 0.07,
+          "f1": 0.1273,
+          "support": 200
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "Normal",
+          "DoS",
+          "Probe",
+          "R2L",
+          "U2R"
+        ],
+        "matrix": [
+          [
+            9427,
+            75,
+            205,
+            2,
+            2
+          ],
+          [
+            1185,
+            6162,
+            111,
+            0,
+            0
+          ],
+          [
+            722,
+            163,
+            1536,
+            0,
+            0
+          ],
+          [
+            2473,
+            0,
+            2,
+            275,
+            4
+          ],
+          [
+            169,
+            0,
+            17,
+            0,
+            14
+          ]
+        ]
+      },
+      "calibration_error": 0.2157
+    },
+    "lightgbm_calibrated": {
+      "accuracy": 0.7655,
+      "macro_f1": 0.5319,
+      "weighted_f1": 0.7297,
+      "false_positive_rate": 0.0277,
+      "attack_detection_rate": 0.6285,
+      "per_class": {
+        "Normal": {
+          "precision": 0.6645,
+          "recall": 0.9723,
+          "f1": 0.7894,
+          "support": 9711
+        },
+        "DoS": {
+          "precision": 0.9636,
+          "recall": 0.8136,
+          "f1": 0.8823,
+          "support": 7458
+        },
+        "Probe": {
+          "precision": 0.8404,
+          "recall": 0.6113,
+          "f1": 0.7078,
+          "support": 2421
+        },
+        "R2L": {
+          "precision": 0.9922,
+          "recall": 0.093,
+          "f1": 0.17,
+          "support": 2754
+        },
+        "U2R": {
+          "precision": 0.6667,
+          "recall": 0.06,
+          "f1": 0.1101,
+          "support": 200
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "Normal",
+          "DoS",
+          "Probe",
+          "R2L",
+          "U2R"
+        ],
+        "matrix": [
+          [
+            9442,
+            67,
+            198,
+            2,
+            2
+          ],
+          [
+            1326,
+            6068,
+            64,
+            0,
+            0
+          ],
+          [
+            779,
+            162,
+            1480,
+            0,
+            0
+          ],
+          [
+            2492,
+            0,
+            2,
+            256,
+            4
+          ],
+          [
+            171,
+            0,
+            17,
+            0,
+            12
+          ]
+        ]
+      },
+      "calibration_error": 0.2007
+    },
+    "anomaly_detector": {
+      "trained_on": "53,874 normal connections from the training data",
+      "normal_flagged_rate": 0.0127,
+      "attacks_flagged_rate": 0.5584,
+      "attacks_missed_by_classifier": 4549,
+      "of_those_caught_by_anomaly_detector": 1029
+    },
+    "combined_alerting": {
+      "note": "An alert is raised when the classifier says \"attack\" OR the anomaly detector says \"unusual\".",
+      "attack_detection_rate": 0.7257,
+      "false_positive_rate": 0.0315
+    }
+  }
+}

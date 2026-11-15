@@ -79,9 +79,29 @@ POST /api/scan
 ```
 
 **Scan Types:**
-- `basic`: Fast scan with common ports
-- `aggressive`: Comprehensive scan with service detection
-- `passive`: Stealth scan with SYN packets
+- `basic`: top 100 ports with a quick version check (`-F -sV --version-light -T4`)
+- `aggressive`: versions, OS detection, default scripts (`-A -T4`)
+- `passive`: stealth SYN scan, no versions (`-sS -T3 -Pn`, needs root)
+
+**Returns** the normal nmap text in `scanOutput`, plus `hosts` (parsed from nmap's XML output:
+address, hostnames, and for each port the state, service, product, version and CPEs) and `stats`.
+
+### Threat intel lookup
+```
+POST /api/intel/enrich
+```
+**Body:** `{ "hosts": [ ...the hosts list from /api/scan... ] }`
+
+For every open port with a known product version it looks up:
+- **NVD** (CVE list and CVSS score)
+- **CISA KEV** (is this CVE being exploited in the wild right now?)
+- **FIRST EPSS** (chance the CVE gets exploited in the next 30 days)
+- **Shodan InternetDB** for public IPs (ports and CVEs Shodan already sees). Private IPs are never sent.
+
+CVEs are ranked: known-exploited first, then by EPSS, then by CVSS. Results are cached for a day.
+Without `NVD_API_KEY` only 5 product versions are checked per scan (NVD allows 5 requests per
+30 seconds without a key), so a lookup can take about 30 seconds. A free key raises this to 20.
+If a source is down you get a warning, not an error.
 
 ### AI Summary
 ```
@@ -90,9 +110,13 @@ POST /api/ai-summary
 **Body:**
 ```json
 {
-  "scanOutput": "nmap scan results..."
+  "scanOutput": "nmap scan results...",
+  "target": "example.com",
+  "intel": { "hosts": [] }
 }
 ```
+`intel` is optional. When given, the real CVE facts are added to the prompt so the AI does not
+have to guess version vulnerabilities.
 
 ### PDF Report Generation
 ```
@@ -103,9 +127,11 @@ POST /api/report
 {
   "target": "example.com",
   "scanOutput": "nmap scan results...",
-  "aiSummary": "AI analysis..."
+  "aiSummary": "AI analysis...",
+  "intel": { "hosts": [] }
 }
 ```
+`intel` is optional and adds a "Known vulnerabilities" table to the PDF.
 
 ## 🔧 Configuration
 
@@ -117,12 +143,21 @@ POST /api/report
 | `NODE_ENV` | Environment mode | `development` |
 | `FRONTEND_URL` | Frontend URL for CORS | `http://localhost:3000` |
 | `GEMINI_API_KEY` | Google Gemini API key | Required |
+| `GEMINI_MODEL` | Gemini model name | `gemini-flash-latest` |
+| `ML_API_URL` | Where the Python ML API runs | `http://localhost:5000` |
+| `NVD_API_KEY` | Free NVD key, makes CVE lookups faster | (none) |
+| `INTEL_ENABLED` | Set to `false` to turn off all outside lookups | `true` |
 
 ### Rate Limiting
 
 - **Window**: 15 minutes
-- **Limit**: 10 requests per IP per window
-- **Scope**: Applied to all API endpoints
+- **Limit**: 10 requests per IP per window, counted separately for scan, AI summary, report and intel
+- **Scope**: scan, AI summary, report and intel endpoints
+
+### Tests
+```bash
+npm test
+```
 
 ## 🛡️ Security Features
 
